@@ -131,7 +131,7 @@ def _include_room_mesh(
         space: Room model with reconstruction paths.
     """
     mesh_path = space.reconstruction.mesh_path
-    if mesh_path.exists() and mesh_path.stat().st_size > 100:
+    if mesh_path.exists() and _is_valid_mesh(mesh_path):
         ET.SubElement(asset, "mesh", {
             "name": "room_mesh",
             "file": str(mesh_path).replace("\\", "/"),
@@ -183,7 +183,7 @@ def _add_room_body(
         space: Room model.
     """
     mesh_path = space.reconstruction.mesh_path
-    if mesh_path.exists() and mesh_path.stat().st_size > 100:
+    if mesh_path.exists() and _is_valid_mesh(mesh_path):
         body = ET.SubElement(worldbody, "body", {
             "name": "room", "pos": "0 0 0",
         })
@@ -430,3 +430,26 @@ def _equipment_color(eq_type: str) -> str:
         "fixture": "0.6 0.6 0.6 1",
     }
     return colors.get(eq_type, "0.5 0.5 0.5 1")
+
+
+def _is_valid_mesh(mesh_path: Path) -> bool:
+    """Check if mesh file exists and can be loaded by MuJoCo.
+
+    Args:
+        mesh_path: Path to mesh file.
+
+    Returns:
+        True if mesh is usable.
+    """
+    if not mesh_path.exists() or mesh_path.stat().st_size < 200:
+        return False
+    try:
+        import mujoco
+        test_xml = f"""<mujoco>
+  <asset><mesh name="test" file="{str(mesh_path).replace(chr(92), '/')}"/></asset>
+  <worldbody><geom type="mesh" mesh="test"/></worldbody>
+</mujoco>"""
+        mujoco.MjModel.from_xml_string(test_xml)
+        return True
+    except Exception:
+        return False
