@@ -128,14 +128,22 @@ def _run_pycolmap_pipeline(
 
     sparse_dir.mkdir(parents=True, exist_ok=True)
     logger.info("Extracting features from %s", photos_dir)
-    pycolmap.extract_features(db_path, photos_dir)
+
+    sift_opts = pycolmap.SiftExtractionOptions()
+    sift_opts.max_num_features = 8192
+    pycolmap.extract_features(db_path, photos_dir, sift_options=sift_opts)
 
     logger.info("Matching features exhaustively")
-    pycolmap.match_exhaustive(db_path)
+    match_opts = pycolmap.SiftMatchingOptions()
+    match_opts.max_ratio = 0.9
+    match_opts.max_distance = 0.9
+    pycolmap.match_exhaustive(db_path, sift_options=match_opts)
 
     logger.info("Running incremental SfM")
+    mapper_opts = pycolmap.IncrementalPipelineOptions()
+    mapper_opts.min_num_matches = 10
     reconstructions = pycolmap.incremental_mapping(
-        db_path, photos_dir, sparse_dir,
+        db_path, photos_dir, sparse_dir, options=mapper_opts,
     )
 
     if not reconstructions:

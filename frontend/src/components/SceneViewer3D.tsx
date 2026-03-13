@@ -182,7 +182,7 @@ function PointCloud({ url, onError }: PointCloudProps): React.JSX.Element | null
   return (
     <points ref={pointsRef} geometry={geometry}>
       <pointsMaterial
-        size={0.005}
+        size={0.008}
         vertexColors={geometry.getAttribute("color") !== null}
         color={geometry.getAttribute("color") ? undefined : "#6cb0e0"}
         sizeAttenuation
