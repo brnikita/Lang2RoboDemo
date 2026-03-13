@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from backend.app.core.claude import get_claude_client
 from backend.app.core.config import get_settings
@@ -91,6 +92,40 @@ async def calibrate_and_analyze(
     )
 
     return space_model
+
+
+@router.get("/{project_id}/pointcloud")
+async def get_pointcloud(project_id: str) -> FileResponse:
+    """Serve the reconstructed point cloud PLY file.
+
+    Args:
+        project_id: Project identifier.
+
+    Returns:
+        PLY file response.
+    """
+    project_dir = _get_project_dir(project_id)
+    ply_path = project_dir / "reconstruction" / "pointcloud.ply"
+    if not ply_path.exists() or ply_path.stat().st_size == 0:
+        raise HTTPException(404, "Point cloud not available")
+    return FileResponse(ply_path, media_type="application/octet-stream")
+
+
+@router.get("/{project_id}/mesh")
+async def get_mesh(project_id: str) -> FileResponse:
+    """Serve the reconstructed mesh OBJ file.
+
+    Args:
+        project_id: Project identifier.
+
+    Returns:
+        OBJ file response.
+    """
+    project_dir = _get_project_dir(project_id)
+    mesh_path = project_dir / "reconstruction" / "mesh.obj"
+    if not mesh_path.exists() or mesh_path.stat().st_size == 0:
+        raise HTTPException(404, "Mesh not available")
+    return FileResponse(mesh_path, media_type="application/octet-stream")
 
 
 def _get_project_dir(project_id: str) -> Path:
