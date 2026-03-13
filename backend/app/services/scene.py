@@ -232,25 +232,31 @@ def _add_new_equipment(
         catalog: Equipment catalog.
         scene_dir: Scene directory for relative paths.
     """
+    name_counts: dict[str, int] = {}
     for placement in placements:
         entry = catalog.get(placement.equipment_id)
         if not entry:
             continue
 
-        model_dir = model_dirs.get(placement.equipment_id)
+        # Ensure unique body names for MuJoCo
+        count = name_counts.get(placement.equipment_id, 0)
+        name_counts[placement.equipment_id] = count + 1
+        body_name = (
+            placement.equipment_id if count == 0
+            else f"{placement.equipment_id}_{count}"
+        )
+
         pos = _format_pos(placement.position)
         euler = f"0 0 {math.radians(placement.orientation_deg):.4f}"
 
         body = ET.SubElement(worldbody, "body", {
-            "name": placement.equipment_id,
+            "name": body_name,
             "pos": pos, "euler": euler,
         })
 
-        # Always use box geom for now — include requires validated
-        # Menagerie models which need special handling
         size = _equipment_half_size(entry)
         ET.SubElement(body, "geom", {
-            "name": f"{placement.equipment_id}_geom",
+            "name": f"{body_name}_geom",
             "type": "box",
             "size": f"{size[0]:.3f} {size[1]:.3f} {size[2]:.3f}",
             "rgba": _equipment_color(entry.type),
