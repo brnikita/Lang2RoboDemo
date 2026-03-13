@@ -1,0 +1,93 @@
+[
+  {
+    "id": "work_table_120x80",
+    "name": "Work Table 120x80cm",
+    "type": "fixture",
+    "specs": {
+      "length_m": 1.2,
+      "width_m": 0.8,
+      "height_m": 0.85,
+      "max_load_kg": 100.0
+    },
+    "mjcf_source": {
+      "menagerie_id": null,
+      "robot_descriptions_id": null,
+      "urdf_url": null
+    },
+    "price_usd": 300,
+    "purchase_url": null,
+    "placement_rules": {
+      "min_zone_m2": 1.5,
+      "constraints": {}
+    }
+  },
+  {
+    "id": "work_table_180x80",
+    "name": "Work Table 180x80cm",
+    "type": "fixture",
+    "specs": {
+      "length_m": 1.8,
+      "width_m": 0.8,
+      "height_m": 0.85,
+      "max_load_kg": 150.0
+    },
+    "mjcf_source": {
+      "menagerie_id": null,
+      "robot_descriptions_id": null,
+      "urdf_url": null
+    },
+    "price_usd": 450,
+    "purchase_url": null,
+    "placement_rules": {
+      "min_zone_m2": 2.5,
+      "constraints": {}
+    }
+  },
+  {
+    "id": "shelving_unit_5tier",
+    "name": "Shelving Unit 5-Tier",
+    "type": "fixture",
+    "specs": {
+      "length_m": 1.0,
+      "width_m": 0.4,
+      "height_m": 1.8,
+      "max_load_kg": 200.0,
+      "tiers": 5
+    },
+    "mjcf_source": {
+      "menagerie_id": null,
+      "robot_descriptions_id": null,
+      "urdf_url": null
+    },
+    "price_usd": 200,
+    "purchase_url": null,
+    "placement_rules": {
+      "min_zone_m2": 0.8,
+      "constraints": {
+        "wall_mount": "recommended"
+      }
+    }
+  },
+  {
+    "id": "storage_container_large",
+    "name": "Storage Container Large",
+    "type": "fixture",
+    "specs": {
+      "length_m": 0.6,
+      "width_m": 0.4,
+      "height_m": 0.3,
+      "max_load_kg": 25.0
+    },
+    "mjcf_source": {
+      "menagerie_id": null,
+      "robot_descriptions_id": null,
+      "urdf_url": null
+    },
+    "price_usd": 30,
+    "purchase_url": null,
+    "placement_rules": {
+      "min_zone_m2": 0.0,
+      "constraints": {}
+    }
+  }
+]

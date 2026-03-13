@@ -1,0 +1,203 @@
+[
+  {
+    "id": "franka_emika_panda",
+    "name": "Franka Emika Panda",
+    "type": "manipulator",
+    "specs": {
+      "reach_m": 0.855,
+      "payload_kg": 3.0,
+      "dof": 7,
+      "repeatability_mm": 0.1
+    },
+    "mjcf_source": {
+      "menagerie_id": "franka_emika_panda",
+      "robot_descriptions_id": "panda_mj_description",
+      "urdf_url": null
+    },
+    "price_usd": 30000,
+    "purchase_url": null,
+    "placement_rules": {
+      "min_zone_m2": 2.0,
+      "constraints": {
+        "mounting": "table_or_floor",
+        "clearance_m": "0.5"
+      }
+    }
+  },
+  {
+    "id": "universal_robots_ur5e",
+    "name": "Universal Robots UR5e",
+    "type": "manipulator",
+    "specs": {
+      "reach_m": 0.85,
+      "payload_kg": 5.0,
+      "dof": 6,
+      "repeatability_mm": 0.03
+    },
+    "mjcf_source": {
+      "menagerie_id": "universal_robots_ur5e",
+      "robot_descriptions_id": "ur5e_mj_description",
+      "urdf_url": null
+    },
+    "price_usd": 35000,
+    "purchase_url": null,
+    "placement_rules": {
+      "min_zone_m2": 2.0,
+      "constraints": {
+        "mounting": "table_or_floor",
+        "clearance_m": "0.5"
+      }
+    }
+  },
+  {
+    "id": "ufactory_xarm7",
+    "name": "UFactory xArm 7",
+    "type": "manipulator",
+    "specs": {
+      "reach_m": 0.7,
+      "payload_kg": 3.5,
+      "dof": 7,
+      "repeatability_mm": 0.1
+    },
+    "mjcf_source": {
+      "menagerie_id": "ufactory_xarm7",
+      "robot_descriptions_id": "xarm7_mj_description",
+      "urdf_url": null
+    },
+    "price_usd": 9000,
+    "purchase_url": null,
+    "placement_rules": {
+      "min_zone_m2": 1.5,
+      "constraints": {
+        "mounting": "table_or_floor",
+        "clearance_m": "0.4"
+      }
+    }
+  },
+  {
+    "id": "trs_so_arm100",
+    "name": "TRS SO-ARM100",
+    "type": "manipulator",
+    "specs": {
+      "reach_m": 0.28,
+      "payload_kg": 0.15,
+      "dof": 5,
+      "repeatability_mm": 1.0
+    },
+    "mjcf_source": {
+      "menagerie_id": "trs_so_arm100",
+      "robot_descriptions_id": "so_arm100_mj_description",
+      "urdf_url": null
+    },
+    "price_usd": 110,
+    "purchase_url": null,
+    "placement_rules": {
+      "min_zone_m2": 0.5,
+      "constraints": {
+        "mounting": "table",
+        "clearance_m": "0.2"
+      }
+    }
+  },
+  {
+    "id": "aloha",
+    "name": "ALOHA Bimanual",
+    "type": "manipulator",
+    "specs": {
+      "reach_m": 0.45,
+      "payload_kg": 0.5,
+      "dof": 14,
+      "repeatability_mm": 0.5,
+      "bimanual": 1
+    },
+    "mjcf_source": {
+      "menagerie_id": "aloha",
+      "robot_descriptions_id": "aloha_mj_description",
+      "urdf_url": null
+    },
+    "price_usd": 20000,
+    "purchase_url": null,
+    "placement_rules": {
+      "min_zone_m2": 1.5,
+      "constraints": {
+        "mounting": "table",
+        "clearance_m": "0.3"
+      }
+    }
+  },
+  {
+    "id": "kinova_gen3",
+    "name": "Kinova Gen3",
+    "type": "manipulator",
+    "specs": {
+      "reach_m": 0.902,
+      "payload_kg": 4.0,
+      "dof": 7,
+      "repeatability_mm": 0.1
+    },
+    "mjcf_source": {
+      "menagerie_id": "kinova_gen3",
+      "robot_descriptions_id": "gen3_mj_description",
+      "urdf_url": null
+    },
+    "price_usd": 25000,
+    "purchase_url": null,
+    "placement_rules": {
+      "min_zone_m2": 2.0,
+      "constraints": {
+        "mounting": "table_or_floor",
+        "clearance_m": "0.5"
+      }
+    }
+  },
+  {
+    "id": "sawyer",
+    "name": "Rethink Robotics Sawyer",
+    "type": "manipulator",
+    "specs": {
+      "reach_m": 1.26,
+      "payload_kg": 4.0,
+      "dof": 7,
+      "repeatability_mm": 0.1
+    },
+    "mjcf_source": {
+      "menagerie_id": "rethink_robotics_sawyer",
+      "robot_descriptions_id": "sawyer_mj_description",
+      "urdf_url": null
+    },
+    "price_usd": 29000,
+    "purchase_url": null,
+    "placement_rules": {
+      "min_zone_m2": 3.0,
+      "constraints": {
+        "mounting": "floor",
+        "clearance_m": "0.7"
+      }
+    }
+  },
+  {
+    "id": "widow_x",
+    "name": "Trossen WidowX 250",
+    "type": "manipulator",
+    "specs": {
+      "reach_m": 0.45,
+      "payload_kg": 0.25,
+      "dof": 6,
+      "repeatability_mm": 1.0
+    },
+    "mjcf_source": {
+      "menagerie_id": "trossen_vx300s",
+      "robot_descriptions_id": "widow_mj_description",
+      "urdf_url": null
+    },
+    "price_usd": 3500,
+    "purchase_url": null,
+    "placement_rules": {
+      "min_zone_m2": 0.8,
+      "constraints": {
+        "mounting": "table",
+        "clearance_m": "0.3"
+      }
+    }
+  }
+]

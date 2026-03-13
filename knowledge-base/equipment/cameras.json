@@ -1,0 +1,74 @@
+[
+  {
+    "id": "camera_overhead",
+    "name": "Overhead Camera",
+    "type": "camera",
+    "specs": {
+      "resolution_w": 640,
+      "resolution_h": 480,
+      "fov_deg": 60,
+      "mounting_height_m": 1.5
+    },
+    "mjcf_source": {
+      "menagerie_id": null,
+      "robot_descriptions_id": null,
+      "urdf_url": null
+    },
+    "price_usd": 200,
+    "purchase_url": null,
+    "placement_rules": {
+      "min_zone_m2": 0.0,
+      "constraints": {
+        "mounting": "ceiling_or_gantry"
+      }
+    }
+  },
+  {
+    "id": "camera_microscope",
+    "name": "Microscope Camera",
+    "type": "camera",
+    "specs": {
+      "resolution_w": 1280,
+      "resolution_h": 960,
+      "fov_deg": 30,
+      "mounting_height_m": 0.3
+    },
+    "mjcf_source": {
+      "menagerie_id": null,
+      "robot_descriptions_id": null,
+      "urdf_url": null
+    },
+    "price_usd": 500,
+    "purchase_url": null,
+    "placement_rules": {
+      "min_zone_m2": 0.0,
+      "constraints": {
+        "mounting": "gantry_or_arm"
+      }
+    }
+  },
+  {
+    "id": "camera_barcode",
+    "name": "Barcode Scanner Camera",
+    "type": "camera",
+    "specs": {
+      "resolution_w": 640,
+      "resolution_h": 480,
+      "fov_deg": 45,
+      "mounting_height_m": 0.5
+    },
+    "mjcf_source": {
+      "menagerie_id": null,
+      "robot_descriptions_id": null,
+      "urdf_url": null
+    },
+    "price_usd": 300,
+    "purchase_url": null,
+    "placement_rules": {
+      "min_zone_m2": 0.0,
+      "constraints": {
+        "mounting": "gantry_or_fixture"
+      }
+    }
+  }
+]

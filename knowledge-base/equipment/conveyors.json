@@ -1,0 +1,80 @@
+[
+  {
+    "id": "conveyor_500mm",
+    "name": "Belt Conveyor 500mm",
+    "type": "conveyor",
+    "specs": {
+      "length_m": 0.5,
+      "width_m": 0.15,
+      "height_m": 0.85,
+      "max_speed_m_s": 0.3,
+      "max_load_kg": 5.0
+    },
+    "mjcf_source": {
+      "menagerie_id": null,
+      "robot_descriptions_id": null,
+      "urdf_url": null
+    },
+    "price_usd": 1200,
+    "purchase_url": null,
+    "placement_rules": {
+      "min_zone_m2": 1.0,
+      "constraints": {
+        "mounting": "floor",
+        "clearance_m": "0.2"
+      }
+    }
+  },
+  {
+    "id": "conveyor_1000mm",
+    "name": "Belt Conveyor 1000mm",
+    "type": "conveyor",
+    "specs": {
+      "length_m": 1.0,
+      "width_m": 0.20,
+      "height_m": 0.85,
+      "max_speed_m_s": 0.3,
+      "max_load_kg": 10.0
+    },
+    "mjcf_source": {
+      "menagerie_id": null,
+      "robot_descriptions_id": null,
+      "urdf_url": null
+    },
+    "price_usd": 2000,
+    "purchase_url": null,
+    "placement_rules": {
+      "min_zone_m2": 1.5,
+      "constraints": {
+        "mounting": "floor",
+        "clearance_m": "0.2"
+      }
+    }
+  },
+  {
+    "id": "conveyor_2000mm",
+    "name": "Belt Conveyor 2000mm",
+    "type": "conveyor",
+    "specs": {
+      "length_m": 2.0,
+      "width_m": 0.25,
+      "height_m": 0.85,
+      "max_speed_m_s": 0.5,
+      "max_load_kg": 20.0
+    },
+    "mjcf_source": {
+      "menagerie_id": null,
+      "robot_descriptions_id": null,
+      "urdf_url": null
+    },
+    "price_usd": 3500,
+    "purchase_url": null,
+    "placement_rules": {
+      "min_zone_m2": 3.0,
+      "constraints": {
+        "mounting": "floor",
+        "clearance_m": "0.3"
+      }
+    }
+  }
+]
