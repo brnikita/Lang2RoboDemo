@@ -3,6 +3,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.app.api.capture import router as capture_router
+
 __all__ = ["app"]
 
 
@@ -10,7 +12,7 @@ def create_app() -> FastAPI:
     """Create and configure the FastAPI application.
 
     Returns:
-        Configured FastAPI instance with CORS middleware.
+        Configured FastAPI instance with CORS middleware and routes.
     """
     application = FastAPI(
         title="Lang2Robo",
@@ -24,6 +26,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    application.include_router(capture_router)
     return application
 
 
