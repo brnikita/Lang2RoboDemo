@@ -1,0 +1,21 @@
+{
+  "files.encoding": "utf8",
+  "files.eol": "\n",
+  "editor.insertSpaces": true,
+  "editor.detectIndentation": true,
+  "[python]": {
+    "editor.tabSize": 4
+  },
+  "[typescript][typescriptreact]": {
+    "editor.tabSize": 2
+  },
+  "[json][jsonc]": {
+    "editor.tabSize": 2
+  },
+  "[yaml]": {
+    "editor.tabSize": 2
+  },
+  "[markdown]": {
+    "editor.tabSize": 2
+  }
+}
