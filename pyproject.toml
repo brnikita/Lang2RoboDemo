@@ -10,6 +10,7 @@ dependencies = [
     "pydantic-settings>=2.0",
     "httpx>=0.27",
     "mujoco>=3.0",
+    "pycolmap>=3.10",
     "robot-descriptions",
     "trimesh",
     "numpy",

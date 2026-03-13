@@ -64,6 +64,11 @@ class TestDepsCheck:
     def test_check_returns_dict(self) -> None:
         deps = check_reconstruction_deps()
         assert isinstance(deps, dict)
+        assert "pycolmap" in deps
         assert "mujoco" in deps
         assert "trimesh" in deps
         assert "numpy" in deps
+
+    def test_pycolmap_available(self) -> None:
+        deps = check_reconstruction_deps()
+        assert deps["pycolmap"] is True

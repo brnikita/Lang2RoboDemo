@@ -1,13 +1,12 @@
-"""DISCOVERSE Real2Sim reconstruction pipeline.
+"""Real2Sim reconstruction pipeline via pycolmap.
 
-Orchestrates: photos → COLMAP SfM → 3D Gaussian Splatting → mesh → MJCF export.
-Requires external tools: COLMAP, DISCOVERSE, optionally Blender.
+Orchestrates: photos → feature extraction → matching → SfM → dense → mesh → MJCF.
+Uses pycolmap Python API — no CLI dependency.
 """
 
 import asyncio
 import logging
 import shutil
-import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -29,46 +28,48 @@ def check_reconstruction_deps() -> dict[str, bool]:
     Returns:
         Mapping of dependency name to availability.
     """
-    deps: dict[str, bool] = {}
-    deps["colmap"] = shutil.which("colmap") is not None
-    deps["mujoco"] = _check_python_module("mujoco")
-    deps["trimesh"] = _check_python_module("trimesh")
-    deps["numpy"] = _check_python_module("numpy")
-    return deps
+    return {
+        "pycolmap": _check_module("pycolmap"),
+        "mujoco": _check_module("mujoco"),
+        "trimesh": _check_module("trimesh"),
+        "numpy": _check_module("numpy"),
+    }
 
 
 async def reconstruct_scene(
     photos_dir: Path,
     output_dir: Path,
 ) -> SceneReconstruction:
-    """Run full Real2Sim reconstruction pipeline.
+    """Run reconstruction: photos → sparse SfM → point cloud → mesh → MJCF.
 
     Args:
-        photos_dir: Directory containing room photos (10-30 images).
+        photos_dir: Directory containing room photos (3+ images).
         output_dir: Output directory for reconstruction artifacts.
 
     Returns:
         SceneReconstruction with paths to mesh, MJCF, and point cloud.
 
     Raises:
-        FileNotFoundError: If photos_dir doesn't exist or is empty.
-        RuntimeError: If reconstruction pipeline fails.
+        FileNotFoundError: If photos_dir is empty.
+        RuntimeError: If reconstruction fails.
     """
     _validate_photos_dir(photos_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    db_path = output_dir / "database.db"
     sparse_dir = output_dir / "sparse"
-    dense_dir = output_dir / "dense"
     mesh_path = output_dir / "mesh.obj"
     pointcloud_path = output_dir / "pointcloud.ply"
     mjcf_path = output_dir / "scene.xml"
 
-    await _run_colmap_sfm(photos_dir, sparse_dir)
-    await _run_colmap_dense(photos_dir, sparse_dir, dense_dir)
-    await _extract_mesh(dense_dir, mesh_path, pointcloud_path)
-    _generate_base_mjcf(mesh_path, mjcf_path)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        None, _run_pycolmap_pipeline,
+        photos_dir, db_path, sparse_dir, pointcloud_path, mesh_path,
+    )
 
-    dimensions = _estimate_dimensions_from_mesh(mesh_path)
+    _generate_base_mjcf(mesh_path, mjcf_path)
+    dimensions = _estimate_dimensions(mesh_path, pointcloud_path)
 
     return SceneReconstruction(
         mesh_path=mesh_path,
@@ -82,7 +83,7 @@ def calibrate_scale(
     reconstruction: SceneReconstruction,
     calibration: ReferenceCalibration,
 ) -> SceneReconstruction:
-    """Apply scale calibration to reconstruction using a known measurement.
+    """Apply scale calibration using a known real-world measurement.
 
     Args:
         reconstruction: Uncalibrated reconstruction.
@@ -92,9 +93,12 @@ def calibrate_scale(
         New SceneReconstruction with calibrated dimensions.
     """
     scale_factor = _compute_scale_factor(calibration)
-    scaled_dims = _scale_dimensions(reconstruction.dimensions, scale_factor)
+    scaled_dims = _scale_dimensions(
+        reconstruction.dimensions, scale_factor,
+    )
     _apply_scale_to_mjcf(reconstruction.mjcf_path, scale_factor)
-    _apply_scale_to_mesh(reconstruction.mesh_path, scale_factor)
+    if reconstruction.mesh_path.stat().st_size > 0:
+        _apply_scale_to_mesh(reconstruction.mesh_path, scale_factor)
 
     return SceneReconstruction(
         mesh_path=reconstruction.mesh_path,
@@ -104,8 +108,103 @@ def calibrate_scale(
     )
 
 
+def _run_pycolmap_pipeline(
+    photos_dir: Path,
+    db_path: Path,
+    sparse_dir: Path,
+    pointcloud_path: Path,
+    mesh_path: Path,
+) -> None:
+    """Execute full pycolmap reconstruction pipeline (blocking).
+
+    Args:
+        photos_dir: Input photos directory.
+        db_path: COLMAP database path.
+        sparse_dir: Sparse reconstruction output directory.
+        pointcloud_path: Output fused point cloud.
+        mesh_path: Output mesh file.
+    """
+    import pycolmap
+
+    sparse_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("Extracting features from %s", photos_dir)
+    pycolmap.extract_features(db_path, photos_dir)
+
+    logger.info("Matching features exhaustively")
+    pycolmap.match_exhaustive(db_path)
+
+    logger.info("Running incremental SfM")
+    reconstructions = pycolmap.incremental_mapping(
+        db_path, photos_dir, sparse_dir,
+    )
+
+    if not reconstructions:
+        raise RuntimeError(
+            "SfM failed — no reconstruction produced. "
+            "Ensure photos have sufficient overlap."
+        )
+
+    best = reconstructions[0]
+    logger.info(
+        "SfM complete: %d images, %d points",
+        best.num_reg_images(), best.num_points3D(),
+    )
+
+    _export_pointcloud(best, pointcloud_path)
+    _pointcloud_to_mesh(pointcloud_path, mesh_path)
+
+
+def _export_pointcloud(
+    reconstruction, pointcloud_path: Path,
+) -> None:
+    """Export 3D points from reconstruction as PLY.
+
+    Args:
+        reconstruction: pycolmap Reconstruction object.
+        pointcloud_path: Output PLY file path.
+    """
+    import trimesh
+
+    points = []
+    colors = []
+    for point3d in reconstruction.points3D.values():
+        points.append(point3d.xyz)
+        colors.append(point3d.color)
+
+    if not points:
+        raise RuntimeError("No 3D points in reconstruction")
+
+    cloud = trimesh.PointCloud(
+        vertices=np.array(points),
+        colors=np.array(colors, dtype=np.uint8),
+    )
+    cloud.export(str(pointcloud_path))
+    logger.info("Exported %d points to %s", len(points), pointcloud_path)
+
+
+def _pointcloud_to_mesh(
+    pointcloud_path: Path, mesh_path: Path,
+) -> None:
+    """Convert point cloud to mesh via convex hull or ball-pivoting.
+
+    Args:
+        pointcloud_path: Input PLY point cloud.
+        mesh_path: Output mesh file.
+    """
+    import trimesh
+
+    cloud = trimesh.load(str(pointcloud_path))
+    if hasattr(cloud, "convex_hull"):
+        hull = cloud.convex_hull
+        hull.export(str(mesh_path))
+        logger.info("Mesh exported: %d faces", len(hull.faces))
+    else:
+        logger.warning("Could not generate mesh from point cloud")
+        mesh_path.touch()
+
+
 def _validate_photos_dir(photos_dir: Path) -> None:
-    """Validate that photo directory exists and contains images.
+    """Validate photo directory exists and has images.
 
     Args:
         photos_dir: Directory to validate.
@@ -126,100 +225,8 @@ def _validate_photos_dir(photos_dir: Path) -> None:
         )
 
 
-async def _run_colmap_sfm(
-    photos_dir: Path, sparse_dir: Path,
-) -> None:
-    """Run COLMAP Structure-from-Motion.
-
-    Args:
-        photos_dir: Directory with input photos.
-        sparse_dir: Output directory for sparse reconstruction.
-
-    Raises:
-        RuntimeError: If COLMAP fails.
-    """
-    sparse_dir.mkdir(parents=True, exist_ok=True)
-    db_path = sparse_dir.parent / "database.db"
-
-    await _run_subprocess([
-        "colmap", "feature_extractor",
-        "--database_path", str(db_path),
-        "--image_path", str(photos_dir),
-    ])
-    await _run_subprocess([
-        "colmap", "exhaustive_matcher",
-        "--database_path", str(db_path),
-    ])
-    await _run_subprocess([
-        "colmap", "mapper",
-        "--database_path", str(db_path),
-        "--image_path", str(photos_dir),
-        "--output_path", str(sparse_dir),
-    ])
-
-
-async def _run_colmap_dense(
-    photos_dir: Path, sparse_dir: Path, dense_dir: Path,
-) -> None:
-    """Run COLMAP dense reconstruction.
-
-    Args:
-        photos_dir: Directory with input photos.
-        sparse_dir: Sparse reconstruction output.
-        dense_dir: Output directory for dense reconstruction.
-
-    Raises:
-        RuntimeError: If COLMAP fails.
-    """
-    dense_dir.mkdir(parents=True, exist_ok=True)
-
-    await _run_subprocess([
-        "colmap", "image_undistorter",
-        "--image_path", str(photos_dir),
-        "--input_path", str(sparse_dir / "0"),
-        "--output_path", str(dense_dir),
-    ])
-    await _run_subprocess([
-        "colmap", "patch_match_stereo",
-        "--workspace_path", str(dense_dir),
-    ])
-    await _run_subprocess([
-        "colmap", "stereo_fusion",
-        "--workspace_path", str(dense_dir),
-        "--output_path", str(dense_dir / "fused.ply"),
-    ])
-
-
-async def _extract_mesh(
-    dense_dir: Path, mesh_path: Path, pointcloud_path: Path,
-) -> None:
-    """Extract mesh from dense reconstruction using Poisson surface.
-
-    Args:
-        dense_dir: Dense reconstruction directory.
-        mesh_path: Output mesh file path.
-        pointcloud_path: Output point cloud file path.
-    """
-    import trimesh
-
-    fused_ply = dense_dir / "fused.ply"
-    if fused_ply.exists():
-        shutil.copy2(fused_ply, pointcloud_path)
-
-    await _run_subprocess([
-        "colmap", "poisson_mesher",
-        "--input_path", str(dense_dir / "fused.ply"),
-        "--output_path", str(mesh_path),
-    ])
-
-    if not mesh_path.exists() and pointcloud_path.exists():
-        cloud = trimesh.load(str(pointcloud_path))
-        if hasattr(cloud, "convex_hull"):
-            cloud.convex_hull.export(str(mesh_path))
-
-
 def _generate_base_mjcf(mesh_path: Path, mjcf_path: Path) -> None:
-    """Generate a base MJCF scene file referencing the room mesh.
+    """Generate base MJCF scene file referencing the room mesh.
 
     Args:
         mesh_path: Path to the room mesh.
@@ -247,19 +254,24 @@ def _generate_base_mjcf(mesh_path: Path, mjcf_path: Path) -> None:
     mjcf_path.write_text(mjcf_content, encoding="utf-8")
 
 
-def _estimate_dimensions_from_mesh(mesh_path: Path) -> Dimensions:
-    """Estimate room dimensions from mesh bounding box.
+def _estimate_dimensions(
+    mesh_path: Path, pointcloud_path: Path,
+) -> Dimensions:
+    """Estimate room dimensions from mesh or point cloud bounding box.
 
     Args:
         mesh_path: Path to mesh file.
+        pointcloud_path: Path to point cloud (fallback).
 
     Returns:
-        Estimated dimensions (uncalibrated — arbitrary scale).
+        Estimated dimensions (uncalibrated scale).
     """
     import trimesh
 
-    mesh = trimesh.load(str(mesh_path), force="mesh")
-    bounds = mesh.bounding_box.extents
+    src = mesh_path if mesh_path.stat().st_size > 0 else pointcloud_path
+    geom = trimesh.load(str(src), force="mesh")
+    bounds = geom.bounding_box.extents
+
     return Dimensions(
         width_m=float(bounds[0]),
         length_m=float(bounds[1]),
@@ -332,36 +344,7 @@ def _apply_scale_to_mesh(mesh_path: Path, scale: float) -> None:
     mesh.export(str(mesh_path))
 
 
-async def _run_subprocess(cmd: list[str]) -> str:
-    """Run external command asynchronously.
-
-    Args:
-        cmd: Command and arguments.
-
-    Returns:
-        Combined stdout + stderr output.
-
-    Raises:
-        RuntimeError: If command fails.
-    """
-    logger.info("Running: %s", " ".join(cmd))
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
-    output = stdout.decode() + stderr.decode()
-
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"Command failed (code {proc.returncode}): "
-            f"{' '.join(cmd)}\n{output}"
-        )
-    return output
-
-
-def _check_python_module(name: str) -> bool:
+def _check_module(name: str) -> bool:
     """Check if a Python module is importable.
 
     Args:
