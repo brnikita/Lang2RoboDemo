@@ -1,76 +1,76 @@
 # Lang2Robo — Demo MVP Specification
 
-Платформа: текстовое описание бизнес-процесса → симуляция автоматизированной ячейки → итеративное улучшение. Без реального железа. Работает с любым типом малого бизнеса и любым набором оборудования — с роботами и без.
+Platform: text description of a business process → simulation of an automated cell → iterative improvement. No real hardware. Works with any type of small business and any set of equipment — with or without robots.
 
 ```
-Фото помещения + текст сценария
-  → 3D-реконструкция сцены
-  → AI предлагает план роботизации (текст + схема)
-  → Пользователь подтверждает
-  → Автоскачивание моделей, SDK
-  → Сборка прототипа в MuJoCo
-  → Прогоны и итеративное улучшение политик
+Room photos + scenario text
+  → 3D scene reconstruction
+  → AI proposes a robotization plan (text + diagram)
+  → User confirms
+  → Auto-download of models, SDK
+  → Prototype assembly in MuJoCo
+  → Runs and iterative policy improvement
 ```
 
 ---
 
-## Стек MVP
+## MVP Stack
 
-| Слой | Технология | Почему |
-|------|-----------|--------|
-| Симулятор | **MuJoCo** | `pip install mujoco`, CPU-only, 4000× realtime, Python API |
-| Модели роботов | **MuJoCo Menagerie** + `robot_descriptions` | 135+ готовых MJCF/URDF, подбираются из knowledge-base |
-| Каталог оборудования | **knowledge-base/equipment/** (JSON) | Claude подбирает только из реального каталога, не выдумывает |
-| 3D-реконструкция | **DISCOVERSE** | Open-source Real2Sim пайплайн (фото → MuJoCo), MIT, 650 FPS рендер |
-| Обучение политик | **LeRobot** + **SmolVLA** (450M) | Работает на MacBook, 30Hz, обучение в sim (LIBERO/Meta-World) |
-| AI-планирование | **Claude API** | Vision для фото, текст для рекомендаций и итераций |
-| Оркестрация | **asyncio** | Нулевые зависимости, линейный пайплайн |
-| Бэкенд | **FastAPI** + **Pydantic** | API + валидация |
-| Фронтенд | **React** + **TypeScript** + **Three.js** | 3D-превью сцены, редактор плана |
-| Конвертация моделей | `urdf2mjcf`, `robot-format-converter` | URDF ↔ MJCF ↔ SDF |
+| Layer | Technology | Why |
+|-------|------------|-----|
+| Simulator | **MuJoCo** | `pip install mujoco`, CPU-only, 4000× realtime, Python API |
+| Robot models | **MuJoCo Menagerie** + `robot_descriptions` | 135+ ready MJCF/URDF, selected from knowledge-base |
+| Equipment catalog | **knowledge-base/equipment/** (JSON) | Claude selects only from the real catalog, does not invent |
+| 3D reconstruction | **DISCOVERSE** | Open-source Real2Sim pipeline (photos → MuJoCo), MIT, 650 FPS render |
+| Policy training | **LeRobot** + **SmolVLA** (450M) | Runs on MacBook, 30Hz, training in sim (LIBERO/Meta-World) |
+| AI planning | **Claude API** | Vision for photos, text for recommendations and iterations |
+| Orchestration | **asyncio** | Zero extra dependencies, linear pipeline |
+| Backend | **FastAPI** + **Pydantic** | API + validation |
+| Frontend | **React** + **TypeScript** + **Three.js** | 3D scene preview, plan editor |
+| Model conversion | `urdf2mjcf`, `robot-format-converter` | URDF ↔ MJCF ↔ SDF |
 
-**Минимальные требования**: Python 3.11+, 8 GB RAM, любой CPU. GPU не требуется.
+**Minimum requirements**: Python 3.11+, 8 GB RAM, any CPU. GPU not required.
 
 ---
 
-## Модуль 1. Захват помещения
+## Module 1. Space capture
 
-### Вход
+### Input
 
-Пользователь загружает 10–30 фото помещения (до 50 м²) через веб-интерфейс.
+The user uploads 10–30 photos of the space (up to 50 m²) via the web interface.
 
-### Реконструкция — DISCOVERSE
+### Reconstruction — DISCOVERSE
 
-**DISCOVERSE** (MIT, 2025) — Real2Sim фреймворк. Внутри: COLMAP (SfM) → 3D Gaussian Splatting → MJCF экспорт. Для пользователя — один вызов:
+**DISCOVERSE** (MIT, 2025) — Real2Sim framework. Internally: COLMAP (SfM) → 3D Gaussian Splatting → MJCF export. For the user — a single call:
 
 ```
-Фото (15-30 шт) → DISCOVERSE → MuJoCo сцена (MJCF + коллизионная геометрия)
+Photos (15–30) → DISCOVERSE → MuJoCo scene (MJCF + collision geometry)
 ```
 
-Фотореалистичный рендер 650 FPS в MuJoCo.
+Photorealistic render at 650 FPS in MuJoCo.
 
-Масштаб из фотограмметрии неизвестен (scale ambiguity). После реконструкции пользователь **отмечает два конца известного объекта** (дверь, стол, плитка) в Three.js 3D-превью и вводит реальный размер в метрах.
+Scale from photogrammetry is unknown (scale ambiguity). After reconstruction the user **marks two endpoints of a known object** (door, table, tile) in the Three.js 3D preview and enters the real size in meters.
 
 ```python
 class ReferenceCalibration(BaseModel):
-    """Калибровка масштаба реконструкции."""
+    """Calibration of reconstruction scale."""
 
-    point_a: tuple[float, float, float]  # Точка A в координатах меша
-    point_b: tuple[float, float, float]  # Точка B в координатах меша
-    real_distance_m: float               # Реальное расстояние между A и B
+    point_a: tuple[float, float, float]  # Point A in mesh coordinates
+    point_b: tuple[float, float, float]  # Point B in mesh coordinates
+    real_distance_m: float               # Real distance between A and B
 
 async def reconstruct_and_calibrate(
     photos_dir: Path,
     calibration: ReferenceCalibration,
 ) -> SceneReconstruction:
-    """Реконструкция помещения + калибровка масштаба.
+    """Room reconstruction + scale calibration.
 
     Args:
-        photos_dir: Директория с фото помещения.
-        calibration: Reference-измерение от пользователя (две точки + реальный размер).
+        photos_dir: Directory with room photos.
+        calibration: Reference measurement from user (two points + real size).
 
     Returns:
-        Реконструированная сцена в реальном масштабе.
+        Reconstructed scene at real scale.
     """
     scene = discoverse.real2sim(
         image_path=photos_dir,
@@ -91,25 +91,25 @@ async def reconstruct_and_calibrate(
     )
 ```
 
-### Распознавание и структурирование — Claude Vision
+### Recognition and structuring — Claude Vision
 
-Claude Vision анализирует фото **и** меш от DISCOVERSE, извлекая структурированные данные:
-- Размеры помещения (из масштабированного меша DISCOVERSE)
-- Существующее оборудование, зоны, двери, окна (из фото)
+Claude Vision analyzes the photos **and** the mesh from DISCOVERSE, extracting structured data:
+- Room dimensions (from the scaled DISCOVERSE mesh)
+- Existing equipment, zones, doors, windows (from photos)
 
 ```python
 async def analyze_scene(
     photos: list[Path],
     reconstruction: SceneReconstruction,
 ) -> SceneAnalysis:
-    """Анализ помещения: фото + реконструкция → структурированные данные.
+    """Room analysis: photos + reconstruction → structured data.
 
     Args:
-        photos: Фото помещения.
-        reconstruction: Результат DISCOVERSE (меш, MJCF).
+        photos: Room photos.
+        reconstruction: DISCOVERSE result (mesh, MJCF).
 
     Returns:
-        Размеры, зоны, существующее оборудование.
+        Dimensions, zones, existing equipment.
     """
     system_prompt = load_prompt("prompts/vision_analysis.md")
 
@@ -120,21 +120,20 @@ async def analyze_scene(
             "role": "user",
             "content": [
                 *[image_content(photo) for photo in photos],
-                text_content(f"Меш помещения: {reconstruction.dimensions}"),
+                text_content(f"Room mesh: {reconstruction.dimensions}"),
             ],
         }],
     )
     return SceneAnalysis.model_validate_json(response.content[0].text)
 ```
 
-### Объединение → SpaceModel
+### Merge → SpaceModel
 
-Реконструкция (DISCOVERSE MJCF) + анализ (Claude Vision) → `SpaceModel`:
+Reconstruction (DISCOVERSE MJCF) + analysis (Claude Vision) → `SpaceModel`:
 
-```python
 ```python
 class Dimensions(BaseModel):
-    """Размеры помещения."""
+    """Room dimensions."""
 
     width_m: float
     length_m: float
@@ -142,26 +141,26 @@ class Dimensions(BaseModel):
     area_m2: float
 
 class Zone(BaseModel):
-    """Функциональная зона помещения."""
+    """Functional zone of the room."""
 
     name: str
-    polygon: list[tuple[float, float]]  # 2D-контур в метрах
+    polygon: list[tuple[float, float]]  # 2D contour in meters
     area_m2: float
 
 class Door(BaseModel):
-    """Дверь в помещении."""
+    """Door in the room."""
 
     position: tuple[float, float]
     width_m: float
 
 class Window(BaseModel):
-    """Окно в помещении."""
+    """Window in the room."""
 
     position: tuple[float, float]
     width_m: float
 
 class ExistingEquipment(BaseModel):
-    """Оборудование, уже присутствующее в помещении."""
+    """Equipment already present in the room."""
 
     name: str
     category: str
@@ -169,15 +168,15 @@ class ExistingEquipment(BaseModel):
     confidence: float
 
 class SceneReconstruction(BaseModel):
-    """Результат DISCOVERSE Real2Sim."""
+    """DISCOVERSE Real2Sim result."""
 
     mesh_path: Path
-    mjcf_path: Path            # MJCF сцены помещения (база для добавления оборудования)
+    mjcf_path: Path            # Room scene MJCF (base for adding equipment)
     pointcloud_path: Path
-    dimensions: Dimensions     # Из масштабированного меша (после reference calibration)
+    dimensions: Dimensions     # From scaled mesh (after reference calibration)
 
 class SceneAnalysis(BaseModel):
-    """Результат анализа Claude Vision."""
+    """Claude Vision analysis result."""
 
     zones: list[Zone]
     existing_equipment: list[ExistingEquipment]
@@ -185,104 +184,103 @@ class SceneAnalysis(BaseModel):
     windows: list[Window]
 
 class SpaceModel(BaseModel):
-    """Модель помещения для симуляции."""
+    """Room model for simulation."""
 
     dimensions: Dimensions
     zones: list[Zone]
     existing_equipment: list[ExistingEquipment]
     doors: list[Door]
     windows: list[Window]
-    reconstruction: SceneReconstruction  # Ссылка на MJCF и меш от DISCOVERSE
-```
+    reconstruction: SceneReconstruction  # Reference to DISCOVERSE MJCF and mesh
 ```
 
-### Веб-интерфейс (этап 1)
+### Web interface (stage 1)
 
-1. Загрузка фото (drag-and-drop)
-2. Ожидание реконструкции DISCOVERSE (прогресс-бар)
-3. Three.js: 3D-превью меша. **Калибровка**: пользователь кликает две точки на известном объекте (дверь, стол) и вводит реальный размер в метрах
-4. 2D floor plan сверху с распознанным оборудованием и зонами
-5. Редактирование: корректировка зон, оборудования
-6. Кнопка «Подтвердить план»
+1. Photo upload (drag-and-drop)
+2. Wait for DISCOVERSE reconstruction (progress bar)
+3. Three.js: 3D mesh preview. **Calibration**: user clicks two points on a known object (door, table) and enters real size in meters
+4. 2D floor plan from above with recognized equipment and zones
+5. Editing: adjust zones, equipment
+6. “Confirm plan” button
 
 ---
 
-## Knowledge-base — каталог оборудования
+## Knowledge-base — equipment catalog
 
-Ключевой архитектурный элемент из оригинальной спеки. Claude **не выдумывает** оборудование — работает только по каталогу. Каждый `equipment_id` из ответа Claude валидируется по каталогу; если не найден — ретрай.
+Key architectural element from the original spec. Claude **does not invent** equipment — it only works from the catalog. Every `equipment_id` from Claude’s response is validated against the catalog; if not found — retry.
 
-Только оборудование, которое можно симулировать в MuJoCo (есть MJCF/URDF-модель):
+Only equipment that can be simulated in MuJoCo (has MJCF/URDF model):
 
 ```
 knowledge-base/
 └── equipment/
     ├── manipulators.json    # SO-101, xArm, Franka, UR5e, Koch...
-    ├── conveyors.json       # Модули конвейеров (с физикой ленты)
-    ├── cameras.json         # Камеры (рендер в MuJoCo)
-    └── fixtures.json        # Столы, полки, стойки, контейнеры (статическая геометрия)
+    ├── conveyors.json       # Conveyor modules (with belt physics)
+    ├── cameras.json         # Cameras (render in MuJoCo)
+    └── fixtures.json        # Tables, shelves, stands, containers (static geometry)
 ```
 
-Каждая позиция оборудования содержит:
+Each equipment entry contains:
 
 ```python
 class EquipmentEntry(BaseModel):
-    """Запись оборудования в каталоге."""
+    """Equipment entry in the catalog."""
 
     id: str
     name: str
     type: Literal["manipulator", "conveyor", "camera", "fixture"]
-    specs: dict                # reach, payload, размеры, скорость ленты и т.д.
-    mjcf_source: MjcfSource    # menagerie_id или urdf_url
+    specs: dict                # reach, payload, dimensions, belt speed, etc.
+    mjcf_source: MjcfSource    # menagerie_id or urdf_url
     price_usd: float | None = None
     purchase_url: str | None = None
-    placement_rules: PlacementRules | None = None  # мин. зона, ограничения
+    placement_rules: PlacementRules | None = None  # min zone, constraints
 
 class MjcfSource(BaseModel):
-    """Источник MJCF-модели."""
+    """MJCF model source."""
 
     menagerie_id: str | None = None    # e.g. "franka_emika_panda"
     robot_descriptions_id: str | None = None
-    urdf_url: str | None = None        # Прямая ссылка на URDF
+    urdf_url: str | None = None        # Direct link to URDF
 ```
 
-> Датчики, актуаторы, контроллеры — не входят в MVP (нет MJCF-моделей, нужны только для реального железа).
+> Sensors, actuators, controllers — not in MVP (no MJCF models; needed only for real hardware).
 
-Поле `type` определяет, как оборудование ведёт себя в симуляции:
-- `manipulator` — управляется через IK/политику, выполняет pick/place/move
-- `conveyor` — движет объекты по ленте, управляется через скорость
-- `camera` — рендерит изображение для инспекции
-- `fixture` — статическая геометрия (столы, полки), не управляется
+The `type` field defines how equipment behaves in simulation:
+- `manipulator` — controlled via IK/policy, performs pick/place/move
+- `conveyor` — moves objects on belt, controlled via speed
+- `camera` — renders image for inspection
+- `fixture` — static geometry (tables, shelves), not controlled
 
 ---
 
-## Модуль 2. AI-рекомендация
+## Module 2. AI recommendation
 
-### Вход
+### Input
 
-SpaceModel + текстовое описание сценария автоматизации от пользователя.
+SpaceModel + user’s text description of the automation scenario.
 
-Пример: *«Тёмная кухня, 3 рабочие станции. Манипулятор порционирует на станции 2. Конвейер перемещает контейнеры между станциями. Нужен контроль качества камерой.»*
+Example: *“Dark kitchen, 3 workstations. Manipulator portions at station 2. Conveyor moves containers between stations. Need quality control with a camera.”*
 
-### Процесс
+### Process
 
-Claude API получает:
+Claude API receives:
 - SpaceModel (JSON)
-- Текст сценария
-- **Каталог оборудования из knowledge-base**
+- Scenario text
+- **Equipment catalog from knowledge-base**
 
 ```python
 async def generate_recommendation(
     space: SpaceModel,
     scenario: str,
 ) -> Recommendation:
-    """Генерация плана роботизации через Claude API.
+    """Generate robotization plan via Claude API.
 
     Args:
-        space: Модель помещения.
-        scenario: Текстовое описание сценария от пользователя.
+        space: Room model.
+        scenario: User’s text description of the scenario.
 
     Returns:
-        План роботизации с оборудованием из каталога.
+        Robotization plan with equipment from the catalog.
     """
     catalog = load_equipment_catalog()
     system_prompt = load_prompt("prompts/recommendation.md")
@@ -301,84 +299,84 @@ async def generate_recommendation(
     return recommendation
 ```
 
-**Валидация**: каждый `equipment_id` проверяется по каталогу. Цены берутся из каталога, не из ответа Claude. При невалидном id — ретрай (до 2 раз).
+**Validation**: every `equipment_id` is checked against the catalog. Prices come from the catalog, not from Claude’s response. On invalid id — retry (up to 2 times).
 
-Claude возвращает **два формата**:
+Claude returns **two formats**:
 
-**1. Текстовый план** — человекочитаемое описание:
-- Какое оборудование, почему, где стоит
-- Последовательность действий
-- Ожидаемые метрики
+**1. Text plan** — human-readable description:
+- Which equipment, why, where it is placed
+- Sequence of actions
+- Expected metrics
 
-**2. Структурированный JSON** — машиночитаемый:
+**2. Structured JSON** — machine-readable:
 
 ```python
 class Recommendation(BaseModel):
-    """План автоматизации помещения."""
+    """Room automation plan."""
 
     equipment: list[EquipmentPlacement]
-    work_objects: list[WorkObject]       # Объекты для манипуляции (изделия, контейнеры)
-    target_positions: dict[str, tuple[float, float, float]]  # Маппинг имя → координаты
+    work_objects: list[WorkObject]       # Objects for manipulation (parts, containers)
+    target_positions: dict[str, tuple[float, float, float]]  # Name → coordinates mapping
     workflow_steps: list[WorkflowStep]
     expected_metrics: ExpectedMetrics
 
 class EquipmentPlacement(BaseModel):
-    """Размещение нового оборудования в сцене."""
+    """Placement of new equipment in the scene."""
 
-    equipment_id: str      # ID из knowledge-base каталога
+    equipment_id: str      # ID from knowledge-base catalog
     position: tuple[float, float, float]
     orientation_deg: float
     purpose: str
     zone: str
 
 class WorkObject(BaseModel):
-    """Объект для манипуляции в симуляции (изделие, коробка, контейнер)."""
+    """Object for manipulation in simulation (part, box, container)."""
 
     name: str
     shape: Literal["box", "cylinder", "sphere"]
-    size: tuple[float, float, float]  # Для box: x,y,z. Для cylinder: r,h,0
+    size: tuple[float, float, float]  # For box: x,y,z. For cylinder: r,h,0
     mass_kg: float
     position: tuple[float, float, float]
-    count: int = 1                     # Сколько экземпляров
+    count: int = 1                     # Number of instances
 
 class WorkflowStep(BaseModel):
-    """Шаг рабочего процесса."""
+    """Workflow step."""
 
     order: int
     action: str                    # "pick", "place", "move", "transport", "inspect", "wait"
-    equipment_id: str | None = None  # None для "wait"
-    target: str                    # Ключ из target_positions → 3D-координаты
+    equipment_id: str | None = None  # None for "wait"
+    target: str                    # Key from target_positions → 3D coordinates
     duration_s: float
-    params: dict | None = None     # Доп. параметры (speed для конвейера и т.д.)
+    params: dict | None = None     # Extra params (speed for conveyor, etc.)
 ```
 
-### Визуализация плана
+### Plan visualization
 
-Фронтенд отображает рекомендацию:
-- Three.js: 3D-сцена с мешем помещения + контуры оборудования в позициях
-- Текстовый план сбоку
-- Кнопки: «Подтвердить» / «Изменить» (текстом, Claude переделает)
+Frontend shows the recommendation:
+- Three.js: 3D scene with room mesh + equipment outlines at positions
+- Text plan on the side
+- Buttons: “Confirm” / “Edit” (by text; Claude will revise)
 
 ---
 
-## Модуль 3. Автоскачивание и сборка сцены
+## Module 3. Auto-download and scene assembly
 
-### После подтверждения плана
+### After plan confirmation
 
-Система автоматически:
+The system automatically:
 
-1. **Скачивает модели оборудования** по данным из knowledge-base:
+1. **Downloads equipment models** from knowledge-base data:
 ```python
 async def download_equipment_models(
     placements: list[EquipmentPlacement],
 ) -> dict[str, Path]:
-    """Скачивает MJCF/URDF-модели для всего оборудования из рекомендации.
+    """Downloads MJCF/URDF models for all equipment from the recommendation.
 
     Args:
-        placements: Список размещений из Recommendation.
+        placements: List of placements from Recommendation.
 
     Returns:
-        Маппинг equipment_id → путь к модели.
+        Mapping equipment_id → model path.
     """
     catalog = load_equipment_catalog()
     models = {}
@@ -391,7 +389,7 @@ async def download_equipment_models(
     return models
 ```
 
-2. **Собирает MJCF-сцену** — DISCOVERSE-меш как фон + интерактивные объекты:
+2. **Assembles the MJCF scene** — DISCOVERSE mesh as background + interactive objects:
 ```python
 def generate_mjcf_scene(
     space: SpaceModel,
@@ -399,33 +397,33 @@ def generate_mjcf_scene(
     models: dict[str, Path],
     output_path: Path,
 ) -> Path:
-    """Собирает финальную MJCF-сцену: помещение + оборудование + объекты.
+    """Assembles final MJCF scene: room + equipment + objects.
 
     Args:
-        space: Модель помещения (MJCF от DISCOVERSE + existing_equipment).
-        recommendation: План автоматизации.
-        models: Маппинг equipment_id → путь к MJCF-модели.
-        output_path: Путь для сохранения собранной сцены.
+        space: Room model (DISCOVERSE MJCF + existing_equipment).
+        recommendation: Automation plan.
+        models: Mapping equipment_id → MJCF model path.
+        output_path: Path to save the assembled scene.
 
     Returns:
-        Путь к финальному MJCF-файлу.
+        Path to the final MJCF file.
     """
     base_mjcf = load_mjcf(space.reconstruction.mjcf_path)
 
-    # Existing equipment как отдельные интерактивные тела
-    # (упрощённые shapes поверх меша DISCOVERSE)
+    # Existing equipment as separate interactive bodies
+    # (simplified shapes on top of DISCOVERSE mesh)
     for eq in space.existing_equipment:
         add_static_body(base_mjcf, name=eq.name, pos=eq.position,
                         shape="box", size=estimate_size(eq.category))
 
-    # Новое оборудование из рекомендации
+    # New equipment from recommendation
     for placement in recommendation.equipment:
         model_path = models[placement.equipment_id]
         add_equipment_to_scene(base_mjcf, model_path,
                                pos=placement.position,
                                orientation=placement.orientation_deg)
 
-    # Рабочие объекты для манипуляции
+    # Work objects for manipulation
     for obj in recommendation.work_objects:
         for i in range(obj.count):
             add_dynamic_body(base_mjcf, name=f"{obj.name}_{i}",
@@ -436,21 +434,21 @@ def generate_mjcf_scene(
     return output_path
 ```
 
-Три типа тел в сцене:
-- **Фон** — меш DISCOVERSE (стены, пол, потолок, визуал)
-- **Статические тела** — existing_equipment (принтеры, столы), не двигаются, но имеют коллизию
-- **Динамические тела** — work_objects (изделия, коробки), можно хватать и перемещать
+Three body types in the scene:
+- **Background** — DISCOVERSE mesh (walls, floor, ceiling, visuals)
+- **Static bodies** — existing_equipment (printers, tables), do not move but have collision
+- **Dynamic bodies** — work_objects (parts, boxes), can be grasped and moved
 
-3. **Устанавливает зависимости** (если не установлены):
+3. **Installs dependencies** (if not already installed):
 ```bash
 pip install mujoco mujoco-python-viewer lerobot robot_descriptions trimesh
 ```
 
 ---
 
-## Модуль 4. Симуляция и прогоны
+## Module 4. Simulation and runs
 
-### Запуск
+### Launch
 
 ```python
 async def run_simulation(
@@ -460,17 +458,17 @@ async def run_simulation(
     target_positions: dict[str, tuple[float, float, float]],
     policy: LeRobotPolicy | None = None,  # None = scripted mode (MVP v1)
 ) -> SimResult:
-    """Запускает симуляцию сцены в MuJoCo.
+    """Runs scene simulation in MuJoCo.
 
     Args:
-        scene_path: Путь к MJCF-файлу сцены.
-        workflow: Последовательность шагов рабочего процесса.
-        catalog: Каталог оборудования (для определения типа).
-        target_positions: Маппинг имя цели → 3D-координаты.
-        policy: Обученная политика (MVP v2), None для scripted.
+        scene_path: Path to scene MJCF file.
+        workflow: Workflow step sequence.
+        catalog: Equipment catalog (for type resolution).
+        target_positions: Mapping target name → 3D coordinates.
+        policy: Trained policy (MVP v2), None for scripted.
 
     Returns:
-        Результаты симуляции с метриками.
+        Simulation results with metrics.
     """
     model = mujoco.MjModel.from_xml_path(str(scene_path))
     data = mujoco.MjData(model)
@@ -486,9 +484,9 @@ async def run_simulation(
     )
 ```
 
-### Диспетчеризация по типу действия
+### Dispatch by action type
 
-Каждый `WorkflowStep` выполняется в зависимости от типа оборудования и действия:
+Each `WorkflowStep` is executed according to equipment type and action:
 
 ```python
 async def execute_step(
@@ -499,18 +497,18 @@ async def execute_step(
     target_positions: dict[str, tuple[float, float, float]],
     policy: LeRobotPolicy | None,
 ) -> StepResult:
-    """Выполняет один шаг workflow в симуляции.
+    """Executes one workflow step in simulation.
 
     Args:
-        model: MuJoCo модель.
-        data: MuJoCo данные симуляции.
-        step: Шаг рабочего процесса.
-        catalog: Каталог для определения типа оборудования.
-        target_positions: Маппинг имя цели → 3D-координаты.
-        policy: Обученная политика (опционально).
+        model: MuJoCo model.
+        data: MuJoCo simulation data.
+        step: Workflow step.
+        catalog: Catalog for equipment type resolution.
+        target_positions: Mapping target name → 3D coordinates.
+        policy: Trained policy (optional).
 
     Returns:
-        Результат шага: успех, время, коллизии.
+        Step result: success, time, collisions.
     """
     if step.action == "wait":
         return await sim_wait(model, data, step.duration_s)
@@ -534,9 +532,9 @@ async def execute_step(
     raise ValueError(f"Unknown action '{step.action}' for {equipment_type}")
 ```
 
-### Исполнители по типам оборудования
+### Executors by equipment type
 
-**Манипулятор** — IK-контроллер (scripted) или обученная политика (learned):
+**Manipulator** — IK controller (scripted) or trained policy (learned):
 ```python
 async def scripted_manipulation(
     model: mujoco.MjModel,
@@ -544,8 +542,8 @@ async def scripted_manipulation(
     step: WorkflowStep,
     target_positions: dict[str, tuple[float, float, float]],
 ) -> StepResult:
-    """Манипуляция через IK-контроллер."""
-    target_pos = target_positions[step.target]  # Резолвинг имени → координаты
+    """Manipulation via IK controller."""
+    target_pos = target_positions[step.target]  # Resolve name → coordinates
     trajectory = compute_ik_trajectory(model, data, target_pos)
     return execute_trajectory(model, data, trajectory)
 
@@ -555,7 +553,7 @@ async def learned_manipulation(
     step: WorkflowStep,
     policy: LeRobotPolicy,
 ) -> StepResult:
-    """Манипуляция через обученную политику (SmolVLA)."""
+    """Manipulation via trained policy (SmolVLA)."""
     obs = get_observation(model, data)
     while not is_done(model, data, step):
         action = policy.predict(obs)
@@ -565,21 +563,21 @@ async def learned_manipulation(
     return evaluate_result(model, data, step)
 ```
 
-**Конвейер** — управление скоростью ленты:
+**Conveyor** — belt speed control:
 ```python
 async def sim_conveyor(
     model: mujoco.MjModel,
     data: mujoco.MjData,
     step: WorkflowStep,
 ) -> StepResult:
-    """Симуляция конвейера: перемещение объектов по ленте."""
+    """Conveyor simulation: moving objects on the belt."""
     conveyor_joint = find_joint(model, step.equipment_id)
     set_conveyor_speed(data, conveyor_joint, step.params.get("speed", 0.1))
     await sim_until(model, data, step.duration_s)
     return StepResult(success=True, duration_s=step.duration_s)
 ```
 
-**Камера** — рендер + проверка видимости цели:
+**Camera** — render + check target visibility:
 ```python
 async def sim_camera_inspect(
     model: mujoco.MjModel,
@@ -587,7 +585,7 @@ async def sim_camera_inspect(
     step: WorkflowStep,
     target_positions: dict[str, tuple[float, float, float]],
 ) -> StepResult:
-    """Симуляция инспекции: проверка что камера видит цель."""
+    """Inspection simulation: check that camera sees the target."""
     image = render_camera(model, data, camera_name=step.equipment_id)
     target_pos = target_positions[step.target]
     visible = is_in_camera_fov(model, data, step.equipment_id, target_pos)
@@ -599,89 +597,88 @@ async def sim_camera_inspect(
     )
 ```
 
-### Модели данных симуляции
+### Simulation data models
 
 ```python
 class StepResult(BaseModel):
-    """Результат одного шага симуляции."""
+    """Result of one simulation step."""
 
     success: bool
     duration_s: float
     collision_count: int = 0
     error: str | None = None
-    image: np.ndarray | None = None  # Для camera inspect
+    image: np.ndarray | None = None  # For camera inspect
 
 class SimResult(BaseModel):
-    """Результат полного прогона симуляции."""
+    """Result of a full simulation run."""
 
     steps: list[StepResult]
     metrics: SimMetrics
 
 class SimMetrics(BaseModel):
-    """Метрики прогона симуляции."""
+    """Simulation run metrics."""
 
     cycle_time_s: float
     success_rate: float       # 0.0–1.0
     collision_count: int
-    failed_steps: list[int]   # Индексы неудавшихся шагов
+    failed_steps: list[int]   # Indices of failed steps
 ```
 
-### Визуализация
+### Visualization
 
-- **Встроенный MuJoCo viewer** — интерактивная 3D-визуализация прогона
-- **Веб-интерфейс** — рендер кадров MuJoCo → WebSocket → Three.js (для удалённого просмотра)
+- **Built-in MuJoCo viewer** — interactive 3D run visualization
+- **Web interface** — MuJoCo frame render → WebSocket → Three.js (for remote viewing)
 
 ---
 
-## Модуль 5. Итеративное улучшение
+## Module 5. Iterative improvement
 
-### Цикл
+### Loop
 
 ```
-Прогон → Метрики → Claude анализирует → Корректировки → Новый прогон
+Run → Metrics → Claude analyzes → Corrections → New run
 ```
 
-До 5 итераций. Claude получает:
-- Текущие метрики (SimMetrics)
-- Лог коллизий и ошибок
-- Текущую конфигурацию сцены
-- Историю предыдущих итераций
+Up to 5 iterations. Claude receives:
+- Current metrics (SimMetrics)
+- Collision and error log
+- Current scene configuration
+- History of previous iterations
 
-### Что корректирует Claude
+### What Claude corrects
 
-1. **Позиции робота** — ближе/дальше к зоне pick/place
-2. **Позиции объектов** — оптимизация рабочего пространства
-3. **Параметры траектории** — высота подъёма, промежуточные waypoints
-4. **Добавление/удаление объектов** — если не хватает стола, полки
-5. **Смена модели робота** — если reach недостаточен, предложить другой
+1. **Robot positions** — closer/further to pick/place zone
+2. **Object positions** — workspace optimization
+3. **Trajectory parameters** — lift height, intermediate waypoints
+4. **Add/remove objects** — e.g. add table or shelf if missing
+5. **Robot model change** — if reach is insufficient, suggest another from catalog
 
-```python
 ```python
 class PositionChange(BaseModel):
-    """Изменение позиции оборудования."""
+    """Equipment position change."""
 
     equipment_id: str
     new_position: tuple[float, float, float]
     new_orientation_deg: float | None = None
 
 class EquipmentReplacement(BaseModel):
-    """Замена оборудования на другое из каталога."""
+    """Replacement of equipment with another from the catalog."""
 
     old_equipment_id: str
-    new_equipment_id: str   # Валидируется по каталогу
+    new_equipment_id: str   # Validated against catalog
     reason: str
 
 class SceneCorrections(BaseModel):
-    """Коррекции от Claude после анализа метрик."""
+    """Corrections from Claude after metrics analysis."""
 
     position_changes: list[PositionChange] | None = None
     add_equipment: list[EquipmentPlacement] | None = None
     remove_equipment: list[str] | None = None        # equipment_id
     replace_equipment: list[EquipmentReplacement] | None = None
-    workflow_changes: list[WorkflowStep] | None = None  # Изменённые шаги
+    workflow_changes: list[WorkflowStep] | None = None  # Modified steps
 
 class IterationLog(BaseModel):
-    """Лог одной итерации для контекста Claude."""
+    """Log of one iteration for Claude context."""
 
     iteration: int
     metrics: SimMetrics
@@ -693,18 +690,18 @@ async def iterate(
     history: list[IterationLog],
     catalog: dict[str, EquipmentEntry],
 ) -> Path:
-    """Одна итерация улучшения через Claude.
+    """One improvement iteration via Claude.
 
     Args:
-        scene_path: Путь к текущему MJCF-файлу сцены.
-        metrics: Метрики последнего прогона.
-        history: Лог предыдущих итераций.
-        catalog: Каталог оборудования (для валидации замен).
+        scene_path: Path to current scene MJCF file.
+        metrics: Metrics from the last run.
+        history: Log of previous iterations.
+        catalog: Equipment catalog (for validating replacements).
 
     Returns:
-        Путь к скорректированному MJCF-файлу.
+        Path to the corrected MJCF file.
     """
-    # Читаем MJCF-контент — Claude не может читать файлы
+    # Read MJCF content — Claude cannot read files
     scene_xml = scene_path.read_text()
 
     response = await claude_client.messages.create(
@@ -722,7 +719,7 @@ async def iterate(
     )
     corrections = SceneCorrections.model_validate_json(response.content[0].text)
 
-    # Если Claude предложил сменить оборудование — скачать новые модели
+    # If Claude suggested equipment change — download new models
     if corrections.replace_equipment:
         for replacement in corrections.replace_equipment:
             validate_equipment_id(replacement.new_equipment_id, catalog)
@@ -731,23 +728,22 @@ async def iterate(
     new_scene_path = apply_corrections(scene_path, corrections)
     return new_scene_path
 ```
-```
 
-### Критерии остановки
+### Stopping criteria
 
-- `success_rate >= 0.95` и `collision_count == 0` → успех
-- 5 итераций без улучшения → остановка, отчёт пользователю
-- Пользователь может остановить вручную
+- `success_rate >= 0.95` and `collision_count == 0` → success
+- 5 iterations with no improvement → stop, report to user
+- User can stop manually
 
 ---
 
-## Модуль 6. Обучение политик (MVP v2)
+## Module 6. Policy training (MVP v2)
 
-> Этот модуль применяется **только если в рекомендации есть манипуляторы**. Для сценариев без роботов (только конвейеры, камеры) — пайплайн завершается после Модуля 5.
+> This module is used **only if the recommendation includes manipulators**. For scenarios without robots (conveyors, cameras only) — the pipeline ends after Module 5.
 
-### Пайплайн: scripted → демонстрации → обученная политика
+### Pipeline: scripted → demonstrations → trained policy
 
-**Шаг 1. Запись демонстраций** — scripted-контроллер (из Модуля 4, после успешных итераций Модуля 5) записывает траектории в формат LeRobot dataset:
+**Step 1. Record demonstrations** — scripted controller (from Module 4, after successful Module 5 iterations) records trajectories in LeRobot dataset format:
 
 ```python
 async def record_demonstrations(
@@ -756,23 +752,23 @@ async def record_demonstrations(
     num_demos: int = 100,
     output_dir: Path = Path("data/projects/{id}/policies/demos"),
 ) -> Path:
-    """Записывает успешные scripted-траектории как демонстрации.
+    """Records successful scripted trajectories as demonstrations.
 
     Args:
-        scene_path: Финальная MJCF-сцена (после итераций).
-        workflow: Шаги рабочего процесса.
-        num_demos: Количество демонстраций (50-200).
-        output_dir: Директория для LeRobot dataset.
+        scene_path: Final MJCF scene (after iterations).
+        workflow: Workflow steps.
+        num_demos: Number of demonstrations (50–200).
+        output_dir: Directory for LeRobot dataset.
 
     Returns:
-        Путь к записанному dataset.
+        Path to the recorded dataset.
     """
     model = mujoco.MjModel.from_xml_path(str(scene_path))
     dataset = LeRobotDataset(output_dir)
 
     for i in range(num_demos):
         data = mujoco.MjData(model)
-        # Рандомизация начальных позиций объектов для разнообразия
+        # Randomize initial object positions for diversity
         randomize_object_positions(data)
 
         obs_sequence = []
@@ -782,7 +778,7 @@ async def record_demonstrations(
                 apply_action(model, data, action)
                 mujoco.mj_step(model, data)
                 obs_sequence.append(Observation(
-                    image=render_camera(model, data),  # RGB с камеры сцены
+                    image=render_camera(model, data),  # RGB from scene camera
                     joints=get_joint_positions(data),
                     action=action,
                 ))
@@ -793,7 +789,7 @@ async def record_demonstrations(
     return output_dir
 ```
 
-**Шаг 2. Обучение SmolVLA** — fine-tune на записанных демонстрациях:
+**Step 2. Train SmolVLA** — fine-tune on recorded demonstrations:
 ```bash
 python -m lerobot.scripts.train \
   --policy.type=smolvla \
@@ -802,85 +798,85 @@ python -m lerobot.scripts.train \
   --env.task=pick_and_place_custom
 ```
 
-**Шаг 3. Оценка** — прогон обученной политики в той же MuJoCo-сцене, сравнение метрик со scripted.
+**Step 3. Evaluation** — run the trained policy in the same MuJoCo scene, compare metrics with scripted.
 
-**Шаг 4. Итерация** — если метрики ниже scripted, добавить демонстраций (больше рандомизации) и переобучить.
+**Step 4. Iteration** — if metrics are below scripted, add more demonstrations (more randomization) and retrain.
 
 ### SmolVLA
 
-- 450M параметров — работает на CPU/MacBook
+- 450M parameters — runs on CPU/MacBook
 - 30 Hz async inference
-- Предобучена на данных LeRobot community
-- Fine-tune на 50–200 демонстрациях для конкретной задачи
-- **Observations**: RGB-изображение с камеры сцены + joint positions
+- Pre-trained on LeRobot community data
+- Fine-tune on 50–200 demonstrations for the specific task
+- **Observations**: RGB image from scene camera + joint positions
 
 ---
 
-## Пайплайн MVP — от начала до конца
+## MVP pipeline — end to end
 
 ```
 ┌─────────────────────────────────────┐
-│  1. Пользователь                    │
-│     • Загружает фото помещения      │
-│     • Пишет сценарий текстом        │
+│  1. User                            │
+│     • Uploads room photos           │
+│     • Writes scenario in text       │
 └──────────────┬──────────────────────┘
                │
 ┌──────────────▼──────────────────────┐
-│  2. Захват (Модуль 1)               │
-│     • DISCOVERSE → MJCF помещения   │
-│     • Claude Vision → зоны, оборуд. │
+│  2. Capture (Module 1)               │
+│     • DISCOVERSE → room MJCF        │
+│     • Claude Vision → zones, equip.  │
 │     • → SpaceModel                  │
 └──────────────┬──────────────────────┘
                │
 ┌──────────────▼──────────────────────┐
-│  3. Рекомендация (Модуль 2)         │
-│     • Claude API + каталог → JSON   │
-│     • Визуализация в Three.js       │
-│     • Пользователь подтверждает     │
+│  3. Recommendation (Module 2)        │
+│     • Claude API + catalog → JSON   │
+│     • Visualization in Three.js     │
+│     • User confirms                 │
 └──────────────┬──────────────────────┘
                │
 ┌──────────────▼──────────────────────┐
-│  4. Сборка (Модуль 3)               │
-│     • Скачивание MJCF из каталога   │
-│     • MJCF помещения + роботы       │
-│     • → финальная MJCF-сцена        │
+│  4. Assembly (Module 3)               │
+│     • Download MJCF from catalog    │
+│     • Room MJCF + robots            │
+│     • → final MJCF scene            │
 └──────────────┬──────────────────────┘
                │
 ┌──────────────▼──────────────────────┐
-│  5. Симуляция (Модуль 4)            │
+│  5. Simulation (Module 4)            │
 │     • MuJoCo: scripted IK           │
-│     • Метрики: время, успех, коллизии│
+│     • Metrics: time, success, coll.  │
 └──────────────┬──────────────────────┘
                │
 ┌──────────────▼──────────────────────┐
-│  6. Итерации (Модуль 5)        ◄──┐ │
-│     • Claude корректирует сцену   │ │
-│     • Скачивание новых моделей    │ │
-│     •   если смена оборудования   │ │
-│     • Повторный прогон ───────────┘ │
-│     • success_rate ≥ 0.95 → готово  │
+│  6. Iterations (Module 5)       ◄──┐ │
+│     • Claude corrects scene        │ │
+│     • Download new models if       │ │
+│     •   equipment changed          │ │
+│     • Rerun ───────────────────────┘ │
+│     • success_rate ≥ 0.95 → done     │
 └──────────────┬──────────────────────┘
                │
 ┌──────────────▼──────────────────────┐
-│  7. Обучение (Модуль 6, MVP v2)     │
-│     • Только если есть манипуляторы │
-│     • Запись демонстраций (scripted) │
+│  7. Training (Module 6, MVP v2)      │
+│     • Only if manipulators present  │
+│     • Record demonstrations (scripted) │
 │     • LeRobot + SmolVLA fine-tune   │
-│     • Оценка learned vs scripted    │
+│     • Evaluate learned vs scripted  │
 └──────────────┬──────────────────────┘
                │
 ┌──────────────▼──────────────────────┐
-│  8. Результат                       │
-│     • Финальная MJCF-сцена          │
-│     • Обученная политика (v2)       │
-│     • Отчёт с метриками             │
-│     • Видео лучшего прогона         │
+│  8. Result                           │
+│     • Final MJCF scene               │
+│     • Trained policy (v2)            │
+│     • Report with metrics           │
+│     • Video of best run              │
 └─────────────────────────────────────┘
 ```
 
 ---
 
-## Структура проекта
+## Project structure
 
 ```
 lang2robo/
@@ -889,30 +885,30 @@ lang2robo/
 ├── .env.example
 │
 ├── knowledge-base/
-│   └── equipment/            # JSON-каталог оборудования (манипуляторы, конвейеры, датчики...)
+│   └── equipment/            # JSON equipment catalog (manipulators, conveyors, sensors...)
 │
 ├── backend/
 │   ├── app/
 │   │   ├── main.py           # FastAPI entrypoint
 │   │   ├── api/
-│   │   │   ├── capture.py    # POST /capture — загрузка фото, анализ
-│   │   │   ├── recommend.py  # POST /recommend — AI-рекомендация
-│   │   │   ├── simulate.py   # POST /simulate — запуск симуляции
-│   │   │   └── iterate.py    # POST /iterate — итерация улучшения
-│   │   ├── models/           # Pydantic-модели
+│   │   │   ├── capture.py    # POST /capture — photo upload, analysis
+│   │   │   ├── recommend.py  # POST /recommend — AI recommendation
+│   │   │   ├── simulate.py   # POST /simulate — run simulation
+│   │   │   └── iterate.py    # POST /iterate — improvement iteration
+│   │   ├── models/           # Pydantic models
 │   │   │   ├── space.py      # SpaceModel, Zone, Equipment
 │   │   │   ├── recommendation.py  # Recommendation, RobotPlacement
 │   │   │   └── simulation.py      # SimResult, SimMetrics
 │   │   ├── services/
-│   │   │   ├── vision.py     # Claude Vision анализ фото
-│   │   │   ├── planner.py    # Claude рекомендация + итерации
-│   │   │   ├── scene.py      # Генерация MJCF-сцены
-│   │   │   ├── simulator.py  # MuJoCo прогоны
-│   │   │   └── downloader.py # Скачивание моделей из Menagerie
+│   │   │   ├── vision.py     # Claude Vision photo analysis
+│   │   │   ├── planner.py    # Claude recommendation + iterations
+│   │   │   ├── scene.py      # MJCF scene generation
+│   │   │   ├── simulator.py  # MuJoCo runs
+│   │   │   └── downloader.py # Download models from Menagerie
 │   │   └── core/
 │   │       ├── config.py     # Settings (Pydantic)
-│   │       ├── claude.py     # Claude API клиент
-│   │       └── prompts.py    # load_prompt() — загрузка промптов из prompts/
+│   │       ├── claude.py      # Claude API client
+│   │       └── prompts.py     # load_prompt() — load prompts from prompts/
 │   └── tests/
 │       ├── test_vision.py
 │       ├── test_planner.py
@@ -926,7 +922,7 @@ lang2robo/
 │   │   ├── components/
 │   │   │   ├── PhotoUpload.tsx
 │   │   │   ├── FloorPlanEditor.tsx
-│   │   │   ├── SceneViewer3D.tsx    # Three.js MuJoCo сцена
+│   │   │   ├── SceneViewer3D.tsx    # Three.js MuJoCo scene
 │   │   │   ├── RecommendationView.tsx
 │   │   │   ├── SimulationPlayer.tsx
 │   │   │   └── MetricsDashboard.tsx
@@ -935,31 +931,31 @@ lang2robo/
 │   └── tsconfig.json
 │
 ├── prompts/
-│   ├── vision_analysis.md     # System prompt: анализ фото помещения
-│   ├── recommendation.md      # System prompt: генерация плана роботизации
-│   └── iteration.md           # System prompt: коррекция сцены по метрикам
+│   ├── vision_analysis.md     # System prompt: room photo analysis
+│   ├── recommendation.md      # System prompt: robotization plan generation
+│   └── iteration.md           # System prompt: scene correction from metrics
 │
-├── models/                    # Кэш скачанных MJCF-моделей
+├── models/                    # Cache of downloaded MJCF models
 │
 ├── data/
 │   └── projects/
 │       └── {project_id}/
-│           ├── photos/            # Исходные фото пользователя
-│           ├── reconstruction/    # Выход DISCOVERSE (меш, point cloud, MJCF)
-│           ├── recommendation/    # JSON-рекомендация от Claude
-│           ├── scenes/            # MJCF-сцены по итерациям (v1.xml, v2.xml...)
-│           ├── simulations/       # Метрики + видео прогонов
-│           ├── policies/          # Обученные политики + демонстрации (MVP v2)
-│           └── report.json        # Финальный отчёт
+│           ├── photos/            # User’s source photos
+│           ├── reconstruction/   # DISCOVERSE output (mesh, point cloud, MJCF)
+│           ├── recommendation/   # Claude JSON recommendation
+│           ├── scenes/           # MJCF scenes per iteration (v1.xml, v2.xml...)
+│           ├── simulations/      # Run metrics + videos
+│           ├── policies/         # Trained policies + demonstrations (MVP v2)
+│           └── report.json        # Final report
 │
 └── scripts/
     ├── train_policy.py        # LeRobot fine-tune (MVP v2)
-    └── record_demos.py        # Запись демонстраций из scripted (MVP v2)
+    └── record_demos.py        # Record demonstrations from scripted (MVP v2)
 ```
 
 ---
 
-## Зависимости
+## Dependencies
 
 ### Backend (Python)
 
@@ -1000,15 +996,15 @@ training = [
 
 ---
 
-## Переменные окружения
+## Environment variables
 
 ```env
-ANTHROPIC_API_KEY=sk-ant-...   # Единственный внешний сервис
+ANTHROPIC_API_KEY=sk-ant-...   # Only external service
 ```
 
 ---
 
-## Запуск (Demo MVP)
+## Run (Demo MVP)
 
 ```bash
 git clone https://github.com/user/lang2robo
@@ -1016,20 +1012,20 @@ cd lang2robo
 pip install -e ".[training]"
 cd frontend && npm install && npm run build && cd ..
 uvicorn backend.app.main:app --reload
-# Открыть http://localhost:8000
+# Open http://localhost:8000
 ```
 
 ---
 
-## Примеры сценариев
+## Example scenarios
 
-### Сценарий 1: Студия 3D-печати (робот + конвейер + камера)
+### Scenario 1: 3D printing studio (robot + conveyor + camera)
 
-**Помещение**: 30 м², 5 принтеров Bambu Lab, рабочий стол, стеллаж.
+**Space**: 30 m², 5 Bambu Lab printers, work table, shelf.
 
-**Сценарий пользователя**: *«Робот снимает готовые изделия с build plate принтеров, ставит на конвейер. Конвейер перемещает к столу постобработки. Камера детектирует сбои печати.»*
+**User scenario**: *“Robot removes finished prints from printer build plates, places them on the conveyor. Conveyor moves them to the post-processing table. Camera detects print failures.”*
 
-**Recommendation от Claude**:
+**Claude recommendation**:
 ```
 equipment: [franka_emika_panda, conveyor_500mm, camera_overhead]
 
@@ -1056,23 +1052,23 @@ workflow_steps: [
 ]
 ```
 
-**MJCF-сцена**: фон DISCOVERSE + 5 принтеров (static bodies) + Franka + конвейер + камера + 5 изделий (dynamic bodies).
+**MJCF scene**: DISCOVERSE background + 5 printers (static bodies) + Franka + conveyor + camera + 5 parts (dynamic bodies).
 
-**Симуляция**: inspect → pick → place → transport → wait. Все шаги диспатчатся по типу оборудования.
+**Simulation**: inspect → pick → place → transport → wait. All steps dispatched by equipment type.
 
-**Итерация**: Franka не дотянулась до printer_3 → Claude сдвигает робота на (2.5, 1.5, 0.0) → повтор → success.
+**Iteration**: Franka could not reach printer_3 → Claude shifts robot to (2.5, 1.5, 0.0) → rerun → success.
 
-**Обучение (MVP v2)**: Есть манипулятор → 100 демонстраций с рандомизацией позиций изделий → SmolVLA fine-tune.
+**Training (MVP v2)**: Manipulator present → 100 demonstrations with randomized part positions → SmolVLA fine-tune.
 
 ---
 
-### Сценарий 2: ПВЗ — пункт выдачи заказов (БЕЗ робота)
+### Scenario 2: Pickup point — order fulfillment (NO robot)
 
-**Помещение**: 20 м², стеллаж, окно выдачи, стол приёмки.
+**Space**: 20 m², shelf, pickup window, reception table.
 
-**Сценарий пользователя**: *«Пункт выдачи. Конвейер перемещает посылки от стола приёмки к стеллажу. Камера сканирует штрих-коды для сортировки. Без робота.»*
+**User scenario**: *“Pickup point. Conveyor moves parcels from reception table to the shelf. Camera scans barcodes for sorting. No robot.”*
 
-**Recommendation от Claude**:
+**Claude recommendation**:
 ```
 equipment: [conveyor_1000mm, camera_barcode]
 
@@ -1097,23 +1093,23 @@ workflow_steps: [
 ]
 ```
 
-**MJCF-сцена**: фон DISCOVERSE + стеллаж/стол (static bodies) + конвейер + камера + 15 посылок двух размеров (dynamic bodies).
+**MJCF scene**: DISCOVERSE background + shelf/table (static bodies) + conveyor + camera + 15 parcels in two sizes (dynamic bodies).
 
-**Симуляция**: inspect → transport → wait. Нет pick/place — нет IK. Конвейер двигает посылки через трение MuJoCo.
+**Simulation**: inspect → transport → wait. No pick/place — no IK. Conveyor moves parcels via MuJoCo friction.
 
-**Итерация**: Камера не видит reception_table (плохой угол). Claude корректирует позицию камеры → повтор → visible=true.
+**Iteration**: Camera could not see reception_table (bad angle). Claude adjusts camera position → rerun → visible=true.
 
-**Обучение**: Нет манипуляторов → **Модуль 6 пропускается**.
+**Training**: No manipulators → **Module 6 is skipped**.
 
 ---
 
-### Сценарий 3: Мастерская ремонта электроники (робот + камера, без конвейера)
+### Scenario 3: Electronics repair workshop (robot + camera, no conveyor)
 
-**Помещение**: 15 м², паяльная станция, микроскоп, стол с компонентами.
+**Space**: 15 m², soldering station, microscope, table with components.
 
-**Сценарий пользователя**: *«Мастерская ремонта. Робот берёт плату со стола приёмки, подносит к камере-микроскопу для инспекции, перемещает на паяльную станцию.»*
+**User scenario**: *“Repair workshop. Robot picks a board from the intake table, brings it to the microscope camera for inspection, then moves it to the soldering station.”*
 
-**Recommendation от Claude**:
+**Claude recommendation**:
 ```
 equipment: [koch_v1_1, camera_microscope]
 
@@ -1136,23 +1132,23 @@ workflow_steps: [
 ]
 ```
 
-**MJCF-сцена**: фон DISCOVERSE + паяльная станция/микроскоп (static bodies) + Koch v1.1 + камера + 3 платы (dynamic bodies, mass=0.05 кг).
+**MJCF scene**: DISCOVERSE background + soldering station/microscope (static bodies) + Koch v1.1 + camera + 3 boards (dynamic bodies, mass=0.05 kg).
 
-**Симуляция**: pick → move (удерживая плату) → inspect → place. Koch — маленький arm для точных операций.
+**Simulation**: pick → move (holding board) → inspect → place. Koch — small arm for precise operations.
 
-**Итерация**: Koch не дотягивается до soldering_station (reach 0.28 м, нужно 0.35 м). Claude предлагает `replace_equipment`: Koch → Franka. Система скачивает Franka из Menagerie, пересобирает сцену → повтор → success.
+**Iteration**: Koch could not reach soldering_station (reach 0.28 m, need 0.35 m). Claude suggests `replace_equipment`: Koch → Franka. System downloads Franka from Menagerie, reassembles scene → rerun → success.
 
-**Обучение (MVP v2)**: Есть манипулятор → 100 демонстраций с рандомизацией позиций плат → SmolVLA fine-tune.
+**Training (MVP v2)**: Manipulator present → 100 demonstrations with randomized board positions → SmolVLA fine-tune.
 
 ---
 
-### Сценарий 4: Тёмная кухня (робот + конвейер + камера)
+### Scenario 4: Dark kitchen (robot + conveyor + camera)
 
-**Помещение**: 35 м², плита, холодильник, 3 рабочие станции.
+**Space**: 35 m², stove, refrigerator, 3 workstations.
 
-**Сценарий пользователя**: *«Тёмная кухня. Манипулятор порционирует на станции 2. Конвейер подаёт контейнеры от станции 1 к станции 3. Камера контролирует порционирование.»*
+**User scenario**: *“Dark kitchen. Manipulator portions at station 2. Conveyor feeds containers from station 1 to station 3. Camera monitors portioning.”*
 
-**Recommendation от Claude**:
+**Claude recommendation**:
 ```
 equipment: [franka_emika_panda, conveyor_500mm, camera_overhead]
 
@@ -1180,10 +1176,10 @@ workflow_steps: [
 ]
 ```
 
-**MJCF-сцена**: фон DISCOVERSE + плита/холодильник/столы (static bodies) + Franka + конвейер + камера + 5 контейнеров (dynamic bodies).
+**MJCF scene**: DISCOVERSE background + stove/refrigerator/tables (static bodies) + Franka + conveyor + camera + 5 containers (dynamic bodies).
 
-**Симуляция**: pick → place → wait → inspect → pick → place → transport. Полный цикл с манипуляцией и конвейером.
+**Simulation**: pick → place → wait → inspect → pick → place → transport. Full cycle with manipulation and conveyor.
 
-**Итерация**: Коллизия arm ↔ стол при step 6. Claude сдвигает Franka выше (z += 0.1) → повтор → success.
+**Iteration**: Arm ↔ table collision at step 6. Claude shifts Franka higher (z += 0.1) → rerun → success.
 
-**Обучение (MVP v2)**: Есть манипулятор → 100 демонстраций → SmolVLA fine-tune.
+**Training (MVP v2)**: Manipulator present → 100 demonstrations → SmolVLA fine-tune.
