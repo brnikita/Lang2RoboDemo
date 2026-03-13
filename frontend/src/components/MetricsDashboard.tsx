@@ -3,7 +3,7 @@
  */
 
 import { useState, useCallback } from "react";
-import { runIteration } from "@/api/client.ts";
+import { runIteration, launchViewer } from "@/api/client.ts";
 import type { SimResult, IterationLog } from "@/types";
 
 /** Props for MetricsDashboard. */
@@ -93,6 +93,13 @@ export function MetricsDashboard({
           </span>
         </div>
       </div>
+
+      <button
+        style={styles.viewerButton}
+        onClick={() => { launchViewer(projectId).catch(() => {}); }}
+      >
+        Open MuJoCo 3D Viewer
+      </button>
 
       <div style={styles.stepsSection}>
         <h4 style={styles.sectionTitle}>Step Breakdown</h4>
@@ -267,6 +274,17 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 14,
     fontWeight: 600,
     cursor: "pointer",
+  },
+  viewerButton: {
+    padding: "10px 20px",
+    borderRadius: 8,
+    border: "1px solid #333",
+    backgroundColor: "#1a2a1a",
+    color: "#4ade80",
+    fontSize: 14,
+    fontWeight: 600,
+    cursor: "pointer",
+    alignSelf: "center",
   },
   buttonDisabled: { opacity: 0.5, cursor: "not-allowed" },
   error: {

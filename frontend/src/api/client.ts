@@ -133,6 +133,17 @@ export async function runSimulation(projectId: string): Promise<SimResult> {
   });
 }
 
+/**
+ * Launch MuJoCo interactive viewer for the scene.
+ * @param projectId - Project identifier.
+ * @returns Status.
+ */
+export async function launchViewer(projectId: string): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>(`/projects/${projectId}/view`, {
+    method: "POST",
+  });
+}
+
 /** Response from iteration loop endpoint. */
 interface IterateResponse {
   result: SimResult;

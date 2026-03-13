@@ -84,6 +84,42 @@ def _get_project_dir(project_id: str) -> Path:
     return settings.DATA_DIR / "projects" / project_id
 
 
+@router.post("/{project_id}/view")
+async def launch_viewer(project_id: str) -> dict:
+    """Launch MuJoCo interactive viewer for the latest scene.
+
+    Args:
+        project_id: Project identifier.
+
+    Returns:
+        Status message.
+    """
+    scene_path = _find_latest_scene(project_id)
+
+    import threading
+    thread = threading.Thread(
+        target=_open_mujoco_viewer,
+        args=(scene_path,),
+        daemon=True,
+    )
+    thread.start()
+    return {"status": "viewer_launched", "scene": str(scene_path)}
+
+
+def _open_mujoco_viewer(scene_path: Path) -> None:
+    """Open MuJoCo viewer in a separate thread.
+
+    Args:
+        scene_path: Path to MJCF scene.
+    """
+    import mujoco
+    import mujoco.viewer
+
+    model = mujoco.MjModel.from_xml_path(str(scene_path))
+    data = mujoco.MjData(model)
+    mujoco.viewer.launch(model, data)
+
+
 def _load_space_model(project_id: str) -> SpaceModel:
     """Load SpaceModel from project.
 
