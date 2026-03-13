@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api.capture import router as capture_router
 from backend.app.api.recommend import router as recommend_router
+from backend.app.api.simulate import router as simulate_router
 
 __all__ = ["app"]
 
@@ -29,6 +30,7 @@ def create_app() -> FastAPI:
     )
     application.include_router(capture_router)
     application.include_router(recommend_router)
+    application.include_router(simulate_router)
     return application
 
 
