@@ -8,7 +8,7 @@ class TestSettings:
 
     def test_defaults(self) -> None:
         settings = Settings(OPENROUTER_API_KEY="test-key")
-        assert settings.OPENROUTER_MODEL == "anthropic/claude-sonnet-4-20250514"
+        assert settings.OPENROUTER_MODEL == "anthropic/claude-sonnet-4.6"
         assert settings.MAX_ITERATIONS == 5
 
     def test_custom_model(self) -> None:

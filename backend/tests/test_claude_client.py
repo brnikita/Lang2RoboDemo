@@ -20,7 +20,7 @@ class TestClaudeClientIntegration:
         return ClaudeClient(
             api_key=api_key,
             base_url="https://openrouter.ai/api/v1",
-            model="anthropic/claude-sonnet-4-20250514",
+            model="anthropic/claude-sonnet-4.6",
         )
 
     @pytest.mark.asyncio

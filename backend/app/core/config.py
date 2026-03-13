@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     """
 
     OPENROUTER_API_KEY: str = ""
-    OPENROUTER_MODEL: str = "anthropic/claude-sonnet-4-20250514"
+    OPENROUTER_MODEL: str = "anthropic/claude-sonnet-4.6"
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 
     DATA_DIR: Path = _ROOT_DIR / "data"
