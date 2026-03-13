@@ -127,23 +127,26 @@ def _run_pycolmap_pipeline(
     import pycolmap
 
     sparse_dir.mkdir(parents=True, exist_ok=True)
-    logger.info("Extracting features from %s", photos_dir)
+    db_str = str(db_path)
+    photos_str = str(photos_dir)
+    sparse_str = str(sparse_dir)
 
-    sift_opts = pycolmap.SiftExtractionOptions()
-    sift_opts.max_num_features = 8192
-    pycolmap.extract_features(db_path, photos_dir, sift_options=sift_opts)
+    logger.info("Extracting features from %s", photos_dir)
+    extract_opts = pycolmap.FeatureExtractionOptions()
+    extract_opts.sift.max_num_features = 8192
+    pycolmap.extract_features(db_str, photos_str, extraction_options=extract_opts)
 
     logger.info("Matching features exhaustively")
-    match_opts = pycolmap.SiftMatchingOptions()
-    match_opts.max_ratio = 0.9
-    match_opts.max_distance = 0.9
-    pycolmap.match_exhaustive(db_path, sift_options=match_opts)
+    match_opts = pycolmap.FeatureMatchingOptions()
+    match_opts.sift.max_ratio = 0.9
+    match_opts.sift.max_distance = 0.9
+    pycolmap.match_exhaustive(db_str, matching_options=match_opts)
 
     logger.info("Running incremental SfM")
     mapper_opts = pycolmap.IncrementalPipelineOptions()
     mapper_opts.min_num_matches = 10
     reconstructions = pycolmap.incremental_mapping(
-        db_path, photos_dir, sparse_dir, options=mapper_opts,
+        db_str, photos_str, sparse_str, options=mapper_opts,
     )
 
     if not reconstructions:
@@ -152,10 +155,10 @@ def _run_pycolmap_pipeline(
             "Ensure photos have sufficient overlap."
         )
 
-    best = reconstructions[0]
+    best = max(reconstructions.values(), key=lambda r: r.num_points3D())
     logger.info(
-        "SfM complete: %d images, %d points",
-        best.num_reg_images(), best.num_points3D(),
+        "SfM complete: %d reconstructions, best has %d images and %d points",
+        len(reconstructions), best.num_reg_images(), best.num_points3D(),
     )
 
     _export_pointcloud(best, pointcloud_path)
