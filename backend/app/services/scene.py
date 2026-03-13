@@ -246,17 +246,15 @@ def _add_new_equipment(
             "pos": pos, "euler": euler,
         })
 
-        if model_dir and _has_mjcf(model_dir):
-            mjcf_file = _find_mjcf(model_dir)
-            _inline_include(root, body, mjcf_file, scene_dir)
-        else:
-            size = _equipment_half_size(entry)
-            ET.SubElement(body, "geom", {
-                "name": f"{placement.equipment_id}_geom",
-                "type": "box",
-                "size": f"{size[0]:.3f} {size[1]:.3f} {size[2]:.3f}",
-                "rgba": _equipment_color(entry.type),
-            })
+        # Always use box geom for now — include requires validated
+        # Menagerie models which need special handling
+        size = _equipment_half_size(entry)
+        ET.SubElement(body, "geom", {
+            "name": f"{placement.equipment_id}_geom",
+            "type": "box",
+            "size": f"{size[0]:.3f} {size[1]:.3f} {size[2]:.3f}",
+            "rgba": _equipment_color(entry.type),
+        })
 
 
 def _add_work_objects(
@@ -441,14 +439,17 @@ def _is_valid_mesh(mesh_path: Path) -> bool:
     Returns:
         True if mesh is usable.
     """
-    if not mesh_path.exists() or mesh_path.stat().st_size < 200:
+    if not mesh_path.exists():
+        return False
+    if mesh_path.stat().st_size < 10000:
         return False
     try:
         import mujoco
-        test_xml = f"""<mujoco>
-  <asset><mesh name="test" file="{str(mesh_path).replace(chr(92), '/')}"/></asset>
-  <worldbody><geom type="mesh" mesh="test"/></worldbody>
-</mujoco>"""
+        path_str = str(mesh_path).replace(chr(92), "/")
+        test_xml = (
+            f'<mujoco><asset><mesh name="t" file="{path_str}"/></asset>'
+            f'<worldbody><geom type="mesh" mesh="t"/></worldbody></mujoco>'
+        )
         mujoco.MjModel.from_xml_string(test_xml)
         return True
     except Exception:
