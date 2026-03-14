@@ -98,6 +98,9 @@ def _is_cached(cache_dir: Path) -> bool:
 def find_mjcf_in_dir(model_dir: Path) -> Path | None:
     """Find the main MJCF entry point in a model directory.
 
+    Prefers robot-specific XML (e.g. panda.xml, xarm7.xml) over scene.xml,
+    because scene.xml is typically a Menagerie wrapper with includes.
+
     Args:
         model_dir: Directory containing model files.
 
@@ -106,15 +109,34 @@ def find_mjcf_in_dir(model_dir: Path) -> Path | None:
     """
     if model_dir is None or not model_dir.exists():
         return None
-    dir_name = model_dir.name
-    direct = model_dir / f"{dir_name}.xml"
+    direct = model_dir / f"{model_dir.name}.xml"
     if direct.exists():
         return direct
+    robot_xml = _find_robot_xml(model_dir)
+    if robot_xml:
+        return robot_xml
     scene = model_dir / "scene.xml"
     if scene.exists():
         return scene
     xmls = sorted(model_dir.glob("*.xml"))
     return xmls[0] if xmls else None
+
+
+def _find_robot_xml(model_dir: Path) -> Path | None:
+    """Find robot-specific XML, excluding wrappers and variants.
+
+    Args:
+        model_dir: Model directory.
+
+    Returns:
+        Robot XML path or None.
+    """
+    skip = {"scene.xml", "hand.xml"}
+    for xml in sorted(model_dir.glob("*.xml")):
+        if xml.name in skip or xml.name.startswith("mjx_"):
+            continue
+        return xml
+    return None
 
 
 def _fetch_from_robot_descriptions(

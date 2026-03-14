@@ -23,6 +23,8 @@ Phase 4  Action Executors (manipulator/conveyor/camera executors using controlle
 Phase 5  Visual Simulation Runner (viewer plays full workflow in real-time)
    ↓
 Phase 6  Iteration Visibility (model replacement rebuild, before/after comparison)
+   ↓
+Phase 7  QA End-to-End Testing (real room photos, all steps verified)
 ```
 
 ### Phase Summary
@@ -35,6 +37,7 @@ Phase 6  Iteration Visibility (model replacement rebuild, before/after compariso
 | [Phase 4](./phases/phase-4-executors.md) | Action executors: pick/place/move, transport, inspect — using controllers | Full workflow runs with real physics for any scenario |
 | [Phase 5](./phases/phase-5-visual-runner.md) | Visual simulation mode — viewer plays workflow in real-time | "Launch Viewer" → watch automation cycle |
 | [Phase 6](./phases/phase-6-iteration-visibility.md) | Iteration loop rebuilds scene on equipment swap, metrics visibly improve | "Run Optimization" → visible improvements across iterations |
+| [Phase 7](./phases/phase-7-qa-testing.md) | End-to-end QA with real room photos (16 photos of home office) | Upload → Calibrate → Plan → Build → Simulate → Viewer → Optimize → Resume — all pass |
 
 ### Scenario Coverage
 
