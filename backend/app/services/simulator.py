@@ -9,6 +9,7 @@ import numpy as np
 from backend.app.models.equipment import EquipmentEntry
 from backend.app.models.recommendation import WorkflowStep
 from backend.app.models.simulation import SimMetrics, SimResult, StepResult
+from backend.app.services.controllers import GraspManager, IKEngine, find_ee_site
 
 __all__ = ["run_simulation", "compute_metrics"]
 
@@ -175,45 +176,135 @@ def _scripted_manipulation(
     data: mujoco.MjData,
     step: WorkflowStep,
     target_pos: tuple[float, float, float],
-    entry: EquipmentEntry,
+    _entry: EquipmentEntry,
 ) -> StepResult:
-    """Execute manipulator action via Jacobian-based IK.
+    """Execute manipulator action using IK controller and grasp.
 
     Args:
         model: MuJoCo model.
         data: MuJoCo data.
         step: Workflow step (pick/place/move).
         target_pos: Target position xyz.
-        entry: Equipment entry.
+        _entry: Equipment entry (reserved for future reach checks).
 
     Returns:
         Step result with success/failure and timing.
     """
-    body_id = _find_body_id(model, step.equipment_id)
-    if body_id < 0:
-        return StepResult(
-            success=False,
-            duration_s=0,
-            error=f"Body '{step.equipment_id}' not found in scene",
-        )
-
-    target = np.array(target_pos)
-    reach = float(entry.specs.get("reach_m", 1.0))
-
-    body_pos = data.xpos[body_id].copy()
-    distance = float(np.linalg.norm(target - body_pos))
-
-    if distance > reach * 1.2:
+    equipment_id = step.equipment_id
+    try:
+        ee_site = find_ee_site(model, equipment_id)
+    except ValueError:
         return StepResult(
             success=False,
             duration_s=step.duration_s,
-            error=(
-                f"Target at distance {distance:.2f}m exceeds "
-                f"reach {reach:.2f}m for {step.equipment_id}"
-            ),
+            error=f"No EE site for {equipment_id}",
         )
 
-    collisions = _step_physics(model, data, step.duration_s)
+    ik = IKEngine(model, data, ee_site)
+    target = np.array(target_pos)
+
+    if step.action == "pick":
+        return _execute_pick(model, data, ik, target, equipment_id, step)
+    if step.action == "place":
+        return _execute_place(model, data, ik, target, equipment_id, step)
+    return _execute_move(model, data, ik, target, step)
+
+
+def _execute_pick(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    ik: IKEngine,
+    target_pos: np.ndarray,
+    equipment_id: str,
+    step: WorkflowStep,
+) -> StepResult:
+    """Execute a pick action: reach, grasp, and lift.
+
+    Args:
+        model: MuJoCo model.
+        data: MuJoCo data.
+        ik: IK engine for the manipulator.
+        target_pos: Target position to pick from.
+        equipment_id: Equipment performing the pick.
+        step: Workflow step.
+
+    Returns:
+        Step result.
+    """
+    if not ik.reach_target(target_pos, max_steps=1000, tolerance=0.05):
+        return StepResult(
+            success=False,
+            duration_s=step.duration_s,
+            error=f"IK failed to reach pick target for {equipment_id}",
+        )
+
+    obj_name = _find_nearest_object(model, data, target_pos)
+    if obj_name is None:
+        return StepResult(
+            success=False,
+            duration_s=step.duration_s,
+            error="No free object found near pick target",
+        )
+
+    gripper_body = _resolve_gripper_body(model, equipment_id)
+    if gripper_body is None:
+        return StepResult(
+            success=False,
+            duration_s=step.duration_s,
+            error=f"No gripper body found for {equipment_id}",
+        )
+
+    try:
+        gm = GraspManager(model, data, gripper_body)
+    except ValueError as exc:
+        return StepResult(success=False, duration_s=step.duration_s, error=str(exc))
+
+    attached = gm.attach(obj_name)
+
+    lift_pos = target_pos.copy()
+    lift_pos[2] += 0.1
+    ik.reach_target(lift_pos, max_steps=200, tolerance=0.05)
+
+    collisions = _step_physics(model, data, 0.1)
+
+    return StepResult(
+        success=attached,
+        duration_s=step.duration_s,
+        collision_count=collisions,
+    )
+
+
+def _execute_place(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    ik: IKEngine,
+    target_pos: np.ndarray,
+    equipment_id: str,
+    step: WorkflowStep,
+) -> StepResult:
+    """Execute a place action: reach target, release object, settle.
+
+    Args:
+        model: MuJoCo model.
+        data: MuJoCo data.
+        ik: IK engine for the manipulator.
+        target_pos: Target position to place at.
+        equipment_id: Equipment performing the place.
+        step: Workflow step.
+
+    Returns:
+        Step result.
+    """
+    if not ik.reach_target(target_pos, max_steps=1000, tolerance=0.05):
+        return StepResult(
+            success=False,
+            duration_s=step.duration_s,
+            error=f"IK failed to reach place target for {equipment_id}",
+        )
+
+    _deactivate_all_welds(model)
+
+    collisions = _step_physics(model, data, 0.2)
 
     return StepResult(
         success=True,
@@ -222,12 +313,42 @@ def _scripted_manipulation(
     )
 
 
+def _execute_move(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    ik: IKEngine,
+    target_pos: np.ndarray,
+    step: WorkflowStep,
+) -> StepResult:
+    """Execute a move action: reach target position.
+
+    Args:
+        model: MuJoCo model.
+        data: MuJoCo data.
+        ik: IK engine for the manipulator.
+        target_pos: Target position to move to.
+        step: Workflow step.
+
+    Returns:
+        Step result.
+    """
+    reached = ik.reach_target(target_pos, max_steps=1000, tolerance=0.05)
+    collisions = _step_physics(model, data, 0.1)
+
+    return StepResult(
+        success=reached,
+        duration_s=step.duration_s,
+        collision_count=collisions,
+        error=None if reached else "IK failed to reach move target",
+    )
+
+
 def _sim_conveyor(
     model: mujoco.MjModel,
     data: mujoco.MjData,
     step: WorkflowStep,
 ) -> StepResult:
-    """Simulate conveyor transport.
+    """Simulate conveyor transport with belt forces on contacting objects.
 
     Args:
         model: MuJoCo model.
@@ -235,9 +356,21 @@ def _sim_conveyor(
         step: Workflow step with transport params.
 
     Returns:
-        Step result (conveyors always succeed in simulation).
+        Step result with collision count.
     """
-    collisions = _step_physics(model, data, step.duration_s)
+    speed = step.params.get("speed", 0.1) if step.params else 0.1
+    speed = float(speed)
+    belt_geom_name = f"{step.equipment_id}_belt"
+    belt_geom_id = _find_geom_id(model, belt_geom_name)
+
+    duration_steps = int(step.duration_s / model.opt.timestep)
+    collisions = 0
+    for _ in range(min(duration_steps, 5000)):
+        if belt_geom_id >= 0:
+            _apply_belt_forces(model, data, belt_geom_id, speed)
+        mujoco.mj_step(model, data)
+        collisions += data.ncon
+
     return StepResult(
         success=True,
         duration_s=step.duration_s,
@@ -316,6 +449,123 @@ def _find_camera_id(model: mujoco.MjModel, name: str) -> int:
         return mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, name)
     except Exception:
         return -1
+
+
+def _find_geom_id(model: mujoco.MjModel, name: str) -> int:
+    """Find geom ID by name.
+
+    Args:
+        model: MuJoCo model.
+        name: Geom name.
+
+    Returns:
+        Geom ID or -1 if not found.
+    """
+    try:
+        return mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name)
+    except Exception:
+        return -1
+
+
+def _find_nearest_object(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    target_pos: np.ndarray,
+) -> str | None:
+    """Find the nearest free-joint body to a target position.
+
+    Args:
+        model: MuJoCo model.
+        data: MuJoCo data.
+        target_pos: Reference position for proximity search.
+
+    Returns:
+        Name of the closest free-joint body, or None.
+    """
+    best_name: str | None = None
+    best_dist = float("inf")
+
+    for i in range(model.nbody):
+        jnt_adr = model.body_jntadr[i]
+        if jnt_adr < 0:
+            continue
+        if model.jnt_type[jnt_adr] != mujoco.mjtJoint.mjJNT_FREE:
+            continue
+        body_pos = data.xpos[i]
+        dist = float(np.linalg.norm(body_pos - target_pos))
+        if dist < best_dist:
+            best_dist = dist
+            name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, i)
+            if name:
+                best_name = name
+                best_dist = dist
+
+    return best_name
+
+
+def _resolve_gripper_body(
+    model: mujoco.MjModel,
+    _equipment_id: str,
+) -> str | None:
+    """Find the deepest body in the equipment's kinematic chain.
+
+    Uses the last body in the model that has a non-free joint.
+
+    Args:
+        model: MuJoCo model.
+        _equipment_id: Equipment identifier (reserved for prefix matching).
+
+    Returns:
+        Gripper body name, or None.
+    """
+    candidate: str | None = None
+    for i in range(model.nbody):
+        name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, i)
+        if not name:
+            continue
+        if model.body_jntadr[i] < 0:
+            continue
+        jnt_type = model.jnt_type[model.body_jntadr[i]]
+        if jnt_type == mujoco.mjtJoint.mjJNT_FREE:
+            continue
+        candidate = name
+    return candidate
+
+
+def _deactivate_all_welds(model: mujoco.MjModel) -> None:
+    """Deactivate all active weld equality constraints (release grasped objects).
+
+    Args:
+        model: MuJoCo model.
+    """
+    for i in range(model.neq):
+        if model.eq_type[i] == mujoco.mjtEq.mjEQ_WELD and model.eq_active0[i]:
+            model.eq_active0[i] = 0
+
+
+def _apply_belt_forces(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    belt_geom_id: int,
+    speed: float,
+) -> None:
+    """Apply lateral force to bodies in contact with the belt geom.
+
+    Args:
+        model: MuJoCo model.
+        data: MuJoCo data.
+        belt_geom_id: MuJoCo geom ID of the belt surface.
+        speed: Desired belt speed in m/s.
+    """
+    for c_idx in range(data.ncon):
+        contact = data.contact[c_idx]
+        geom1, geom2 = contact.geom1, contact.geom2
+        if geom1 != belt_geom_id and geom2 != belt_geom_id:
+            continue
+        other_geom = geom2 if geom1 == belt_geom_id else geom1
+        body_id = model.geom_bodyid[other_geom]
+        if body_id > 0:
+            data.xfrc_applied[body_id, 0] = speed * 10.0
 
 
 def _check_camera_fov(
