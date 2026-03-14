@@ -11,7 +11,7 @@ from backend.app.models.recommendation import (
     Recommendation,
     WorkObject,
 )
-from backend.app.models.space import SpaceModel
+from backend.app.models.space import Dimensions, SpaceModel
 
 __all__ = ["generate_mjcf_scene", "validate_mjcf"]
 
@@ -43,8 +43,12 @@ def generate_mjcf_scene(
 
     _add_existing_equipment(worldbody, space)
     _add_new_equipment(
-        root, worldbody, recommendation.equipment,
-        model_dirs, catalog, output_path.parent,
+        root,
+        worldbody,
+        recommendation.equipment,
+        model_dirs,
+        catalog,
+        output_path.parent,
     )
     _add_work_objects(worldbody, recommendation.work_objects)
     _add_cameras(root, recommendation.equipment, catalog)
@@ -110,19 +114,34 @@ def _add_texture_and_material(asset: ET.Element) -> None:
     Args:
         asset: Asset XML element.
     """
-    ET.SubElement(asset, "texture", {
-        "name": "grid", "type": "2d", "builtin": "checker",
-        "width": "512", "height": "512",
-        "rgb1": "0.8 0.8 0.8", "rgb2": "0.6 0.6 0.6",
-    })
-    ET.SubElement(asset, "material", {
-        "name": "grid_mat", "texture": "grid",
-        "texrepeat": "4 4", "reflectance": "0.1",
-    })
+    ET.SubElement(
+        asset,
+        "texture",
+        {
+            "name": "grid",
+            "type": "2d",
+            "builtin": "checker",
+            "width": "512",
+            "height": "512",
+            "rgb1": "0.8 0.8 0.8",
+            "rgb2": "0.6 0.6 0.6",
+        },
+    )
+    ET.SubElement(
+        asset,
+        "material",
+        {
+            "name": "grid_mat",
+            "texture": "grid",
+            "texrepeat": "4 4",
+            "reflectance": "0.1",
+        },
+    )
 
 
 def _include_room_mesh(
-    asset: ET.Element, space: SpaceModel,
+    asset: ET.Element,
+    space: SpaceModel,
 ) -> None:
     """Include room mesh from DISCOVERSE reconstruction.
 
@@ -132,14 +151,19 @@ def _include_room_mesh(
     """
     mesh_path = space.reconstruction.mesh_path
     if mesh_path.exists() and _is_valid_mesh(mesh_path):
-        ET.SubElement(asset, "mesh", {
-            "name": "room_mesh",
-            "file": str(mesh_path).replace("\\", "/"),
-        })
+        ET.SubElement(
+            asset,
+            "mesh",
+            {
+                "name": "room_mesh",
+                "file": str(mesh_path).replace("\\", "/"),
+            },
+        )
 
 
 def _add_lighting(
-    worldbody: ET.Element, dims: "Dimensions",
+    worldbody: ET.Element,
+    dims: Dimensions,
 ) -> None:
     """Add scene lighting.
 
@@ -149,14 +173,20 @@ def _add_lighting(
     """
     cx = dims.width_m / 2
     cy = dims.length_m / 2
-    ET.SubElement(worldbody, "light", {
-        "pos": f"{cx:.2f} {cy:.2f} {dims.ceiling_m:.2f}",
-        "dir": "0 0 -1", "diffuse": "1 1 1",
-    })
+    ET.SubElement(
+        worldbody,
+        "light",
+        {
+            "pos": f"{cx:.2f} {cy:.2f} {dims.ceiling_m:.2f}",
+            "dir": "0 0 -1",
+            "diffuse": "1 1 1",
+        },
+    )
 
 
 def _add_floor(
-    worldbody: ET.Element, dims: "Dimensions",
+    worldbody: ET.Element,
+    dims: Dimensions,
 ) -> None:
     """Add floor plane.
 
@@ -166,15 +196,21 @@ def _add_floor(
     """
     sx = dims.width_m / 2
     sy = dims.length_m / 2
-    ET.SubElement(worldbody, "geom", {
-        "name": "floor", "type": "plane",
-        "size": f"{sx:.2f} {sy:.2f} 0.01",
-        "material": "grid_mat",
-    })
+    ET.SubElement(
+        worldbody,
+        "geom",
+        {
+            "name": "floor",
+            "type": "plane",
+            "size": f"{sx:.2f} {sy:.2f} 0.01",
+            "material": "grid_mat",
+        },
+    )
 
 
 def _add_room_body(
-    worldbody: ET.Element, space: SpaceModel,
+    worldbody: ET.Element,
+    space: SpaceModel,
 ) -> None:
     """Add room mesh as visual body.
 
@@ -184,18 +220,31 @@ def _add_room_body(
     """
     mesh_path = space.reconstruction.mesh_path
     if mesh_path.exists() and _is_valid_mesh(mesh_path):
-        body = ET.SubElement(worldbody, "body", {
-            "name": "room", "pos": "0 0 0",
-        })
-        ET.SubElement(body, "geom", {
-            "name": "room_visual", "type": "mesh",
-            "mesh": "room_mesh", "contype": "0",
-            "conaffinity": "0", "rgba": "0.9 0.9 0.9 0.3",
-        })
+        body = ET.SubElement(
+            worldbody,
+            "body",
+            {
+                "name": "room",
+                "pos": "0 0 0",
+            },
+        )
+        ET.SubElement(
+            body,
+            "geom",
+            {
+                "name": "room_visual",
+                "type": "mesh",
+                "mesh": "room_mesh",
+                "contype": "0",
+                "conaffinity": "0",
+                "rgba": "0.9 0.9 0.9 0.3",
+            },
+        )
 
 
 def _add_existing_equipment(
-    worldbody: ET.Element, space: SpaceModel,
+    worldbody: ET.Element,
+    space: SpaceModel,
 ) -> None:
     """Add existing equipment as static bodies.
 
@@ -205,22 +254,33 @@ def _add_existing_equipment(
     """
     for eq in space.existing_equipment:
         pos = f"{eq.position[0]:.3f} {eq.position[1]:.3f} {eq.position[2]:.3f}"
-        body = ET.SubElement(worldbody, "body", {
-            "name": eq.name, "pos": pos,
-        })
-        ET.SubElement(body, "geom", {
-            "name": f"{eq.name}_geom", "type": "box",
-            "size": "0.2 0.2 0.4", "rgba": "0.6 0.4 0.2 1",
-        })
+        body = ET.SubElement(
+            worldbody,
+            "body",
+            {
+                "name": eq.name,
+                "pos": pos,
+            },
+        )
+        ET.SubElement(
+            body,
+            "geom",
+            {
+                "name": f"{eq.name}_geom",
+                "type": "box",
+                "size": "0.2 0.2 0.4",
+                "rgba": "0.6 0.4 0.2 1",
+            },
+        )
 
 
 def _add_new_equipment(
-    root: ET.Element,
+    _root: ET.Element,
     worldbody: ET.Element,
     placements: list[EquipmentPlacement],
-    model_dirs: dict[str, Path],
+    _model_dirs: dict[str, Path],
     catalog: dict[str, EquipmentEntry],
-    scene_dir: Path,
+    _scene_dir: Path,
 ) -> None:
     """Add new equipment from recommendation.
 
@@ -241,26 +301,32 @@ def _add_new_equipment(
         # Ensure unique body names for MuJoCo
         count = name_counts.get(placement.equipment_id, 0)
         name_counts[placement.equipment_id] = count + 1
-        body_name = (
-            placement.equipment_id if count == 0
-            else f"{placement.equipment_id}_{count}"
-        )
+        body_name = placement.equipment_id if count == 0 else f"{placement.equipment_id}_{count}"
 
         pos = _format_pos(placement.position)
         euler = f"0 0 {math.radians(placement.orientation_deg):.4f}"
 
-        body = ET.SubElement(worldbody, "body", {
-            "name": body_name,
-            "pos": pos, "euler": euler,
-        })
+        body = ET.SubElement(
+            worldbody,
+            "body",
+            {
+                "name": body_name,
+                "pos": pos,
+                "euler": euler,
+            },
+        )
 
         size = _equipment_half_size(entry)
-        ET.SubElement(body, "geom", {
-            "name": f"{body_name}_geom",
-            "type": "box",
-            "size": f"{size[0]:.3f} {size[1]:.3f} {size[2]:.3f}",
-            "rgba": _equipment_color(entry.type),
-        })
+        ET.SubElement(
+            body,
+            "geom",
+            {
+                "name": f"{body_name}_geom",
+                "type": "box",
+                "size": f"{size[0]:.3f} {size[1]:.3f} {size[2]:.3f}",
+                "rgba": _equipment_color(entry.type),
+            },
+        )
 
 
 def _add_work_objects(
@@ -278,9 +344,14 @@ def _add_work_objects(
             name = f"{obj.name}_{i}"
             pos = _format_pos(obj.position)
 
-            body = ET.SubElement(worldbody, "body", {
-                "name": name, "pos": pos,
-            })
+            body = ET.SubElement(
+                worldbody,
+                "body",
+                {
+                    "name": name,
+                    "pos": pos,
+                },
+            )
             ET.SubElement(body, "freejoint", {"name": f"{name}_joint"})
 
             geom_attrs = {
@@ -291,11 +362,10 @@ def _add_work_objects(
             }
             if obj.shape == "box":
                 geom_attrs["size"] = (
-                    f"{obj.size[0]/2:.4f} {obj.size[1]/2:.4f} "
-                    f"{obj.size[2]/2:.4f}"
+                    f"{obj.size[0] / 2:.4f} {obj.size[1] / 2:.4f} {obj.size[2] / 2:.4f}"
                 )
             elif obj.shape == "cylinder":
-                geom_attrs["size"] = f"{obj.size[0]:.4f} {obj.size[1]/2:.4f}"
+                geom_attrs["size"] = f"{obj.size[0]:.4f} {obj.size[1] / 2:.4f}"
             elif obj.shape == "sphere":
                 geom_attrs["size"] = f"{obj.size[0]:.4f}"
 
@@ -322,16 +392,17 @@ def _add_cameras(
 
         fov = entry.specs.get("fov_deg", 60)
         height = entry.specs.get("mounting_height_m", 1.5)
-        pos = (
-            f"{placement.position[0]:.3f} "
-            f"{placement.position[1]:.3f} "
-            f"{float(height):.3f}"
+        pos = f"{placement.position[0]:.3f} {placement.position[1]:.3f} {float(height):.3f}"
+        ET.SubElement(
+            worldbody,
+            "camera",
+            {
+                "name": placement.equipment_id,
+                "pos": pos,
+                "zaxis": "0 0 -1",
+                "fovy": str(int(fov)),
+            },
         )
-        ET.SubElement(worldbody, "camera", {
-            "name": placement.equipment_id,
-            "pos": pos, "zaxis": "0 0 -1",
-            "fovy": str(int(fov)),
-        })
 
 
 def _format_pos(position: tuple[float, float, float]) -> str:
@@ -375,10 +446,10 @@ def _find_mjcf(model_dir: Path) -> Path:
 
 
 def _inline_include(
-    root: ET.Element,
+    _root: ET.Element,
     body: ET.Element,
     mjcf_file: Path,
-    scene_dir: Path,
+    _scene_dir: Path,
 ) -> None:
     """Include external MJCF model into scene.
 
@@ -389,9 +460,13 @@ def _inline_include(
         scene_dir: Scene directory for relative paths.
     """
     body.set("childclass", mjcf_file.stem)
-    ET.SubElement(body, "include", {
-        "file": str(mjcf_file),
-    })
+    ET.SubElement(
+        body,
+        "include",
+        {
+            "file": str(mjcf_file),
+        },
+    )
 
 
 def _equipment_half_size(
@@ -451,6 +526,7 @@ def _is_valid_mesh(mesh_path: Path) -> bool:
         return False
     try:
         import mujoco
+
         path_str = str(mesh_path).replace(chr(92), "/")
         test_xml = (
             f'<mujoco><asset><mesh name="t" file="{path_str}"/></asset>'

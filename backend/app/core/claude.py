@@ -115,7 +115,9 @@ class ClaudeClient:
         for attempt in range(_MAX_RETRIES + 1):
             try:
                 response = await self._client.post(
-                    url, json=payload, headers=headers,
+                    url,
+                    json=payload,
+                    headers=headers,
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -124,14 +126,17 @@ class ClaudeClient:
                 last_error = exc
                 logger.warning(
                     "Claude API attempt %d/%d failed: %s",
-                    attempt + 1, _MAX_RETRIES + 1, exc,
+                    attempt + 1,
+                    _MAX_RETRIES + 1,
+                    exc,
                 )
 
         raise last_error  # type: ignore[misc]
 
 
 def _build_vision_content(
-    images: list[Path], text: str,
+    images: list[Path],
+    text: str,
 ) -> list[dict]:
     """Build multimodal content array for vision request.
 
@@ -147,10 +152,12 @@ def _build_vision_content(
         b64 = base64.b64encode(image_path.read_bytes()).decode()
         suffix = image_path.suffix.lstrip(".").lower()
         mime = f"image/{suffix}" if suffix != "jpg" else "image/jpeg"
-        content.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:{mime};base64,{b64}"},
-        })
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{b64}"},
+            }
+        )
     content.append({"type": "text", "text": text})
     return content
 

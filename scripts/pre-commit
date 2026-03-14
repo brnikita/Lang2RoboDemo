@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Pre-commit hook: lint, typecheck, and code quality gates.
+# Install: cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m'
+
+ERRORS=0
+
+step() {
+  printf "${YELLOW}▶ %s${NC}\n" "$1"
+}
+
+pass() {
+  printf "${GREEN}✓ %s${NC}\n" "$1"
+}
+
+fail() {
+  printf "${RED}✗ %s${NC}\n" "$1"
+  ERRORS=$((ERRORS + 1))
+}
+
+# ── Python checks ──
+
+if git diff --cached --name-only | grep -q '\.py$'; then
+  step "Ruff lint (Python)"
+  if python -m ruff check backend/ 2>/dev/null; then
+    pass "Ruff lint"
+  else
+    fail "Ruff lint — run: python -m ruff check backend/ --fix"
+  fi
+
+  step "Ruff format (Python)"
+  if python -m ruff format --check backend/ 2>/dev/null; then
+    pass "Ruff format"
+  else
+    fail "Ruff format — run: python -m ruff format backend/"
+  fi
+
+  step "No print() statements"
+  if git diff --cached --diff-filter=ACM -- '*.py' | grep -n '^\+.*\bprint(' | grep -v '^\+.*#.*noqa'; then
+    fail "print() found in staged Python files — use logging instead"
+  else
+    pass "No print() statements"
+  fi
+fi
+
+# ── Frontend checks ──
+
+if git diff --cached --name-only | grep -q 'frontend/src/'; then
+  step "TypeScript typecheck"
+  if (cd frontend && npm run typecheck 2>/dev/null); then
+    pass "TypeScript typecheck"
+  else
+    fail "TypeScript typecheck — run: cd frontend && npm run typecheck"
+  fi
+
+  step "ESLint (Frontend)"
+  if (cd frontend && npm run lint 2>/dev/null); then
+    pass "ESLint"
+  else
+    fail "ESLint — run: cd frontend && npm run lint"
+  fi
+
+  step "No console.log statements"
+  if git diff --cached --diff-filter=ACM -- 'frontend/src/*.ts' 'frontend/src/*.tsx' | grep -n '^\+.*console\.log'; then
+    fail "console.log found in staged frontend files — remove or use console.warn/error"
+  else
+    pass "No console.log statements"
+  fi
+fi
+
+# ── Result ──
+
+echo ""
+if [ "$ERRORS" -gt 0 ]; then
+  printf "${RED}Pre-commit failed with %d error(s). Fix issues and retry.${NC}\n" "$ERRORS"
+  exit 1
+else
+  printf "${GREEN}All pre-commit checks passed.${NC}\n"
+fi

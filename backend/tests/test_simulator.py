@@ -1,10 +1,6 @@
 """Tests for MuJoCo simulation runner."""
 
-from pathlib import Path
-
-import pytest
-
-from backend.app.models.simulation import SimMetrics, StepResult
+from backend.app.models.simulation import StepResult
 from backend.app.services.simulator import compute_metrics
 
 

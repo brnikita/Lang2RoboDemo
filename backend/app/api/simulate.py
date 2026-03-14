@@ -6,10 +6,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from backend.app.models.recommendation import Recommendation
+from backend.app.models.simulation import SimResult
 from backend.app.models.space import SpaceModel
 from backend.app.services.catalog import load_equipment_catalog
 from backend.app.services.downloader import download_equipment_models
-from backend.app.models.simulation import SimResult
 from backend.app.services.project_status import advance_phase, get_project_dir
 from backend.app.services.scene import generate_mjcf_scene, validate_mjcf
 from backend.app.services.simulator import run_simulation
@@ -56,7 +56,11 @@ async def build_scene(project_id: str) -> BuildSceneResponse:
     scene_path = scenes_dir / "v1.xml"
 
     generate_mjcf_scene(
-        space, recommendation, model_dirs, catalog, scene_path,
+        space,
+        recommendation,
+        model_dirs,
+        catalog,
+        scene_path,
     )
 
     valid = validate_mjcf(scene_path)
@@ -85,6 +89,7 @@ async def launch_viewer(project_id: str) -> dict:
     scene_path = _find_latest_scene(project_id)
 
     import threading
+
     thread = threading.Thread(
         target=_open_mujoco_viewer,
         args=(scene_path,),
@@ -150,7 +155,8 @@ async def simulate(project_id: str) -> SimResult:
     sim_dir = get_project_dir(project_id) / "simulations"
     sim_dir.mkdir(parents=True, exist_ok=True)
     (sim_dir / "latest.json").write_text(
-        result.model_dump_json(indent=2), encoding="utf-8",
+        result.model_dump_json(indent=2),
+        encoding="utf-8",
     )
     advance_phase(project_id, "simulate")
     return result
@@ -189,9 +195,7 @@ def _load_recommendation(project_id: str) -> Recommendation:
     Raises:
         HTTPException: If not found.
     """
-    path = (
-        get_project_dir(project_id) / "recommendation" / "recommendation.json"
-    )
+    path = get_project_dir(project_id) / "recommendation" / "recommendation.json"
     if not path.exists():
         raise HTTPException(404, f"Recommendation not found for {project_id}")
     return Recommendation.model_validate_json(

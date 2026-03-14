@@ -94,42 +94,57 @@ def _execute_step(
 
     if step.equipment_id is None:
         return StepResult(
-            success=False, duration_s=0, error="No equipment for non-wait step",
+            success=False,
+            duration_s=0,
+            error="No equipment for non-wait step",
         )
 
     entry = catalog.get(step.equipment_id)
     if not entry:
         return StepResult(
-            success=False, duration_s=0,
+            success=False,
+            duration_s=0,
             error=f"Equipment '{step.equipment_id}' not in catalog",
         )
 
     target_pos = target_positions.get(step.target)
     if target_pos is None:
         return StepResult(
-            success=False, duration_s=0,
+            success=False,
+            duration_s=0,
             error=f"Target '{step.target}' not in target_positions",
         )
 
     try:
         if entry.type == "manipulator":
             return _scripted_manipulation(
-                model, data, step, target_pos, entry,
+                model,
+                data,
+                step,
+                target_pos,
+                entry,
             )
         if entry.type == "conveyor":
             return _sim_conveyor(model, data, step)
         if entry.type == "camera":
             return _sim_camera_inspect(
-                model, data, step, target_pos, entry,
+                model,
+                data,
+                step,
+                target_pos,
+                entry,
             )
     except Exception as exc:
         logger.error("Step %d failed: %s", step.order, exc)
         return StepResult(
-            success=False, duration_s=0, error=str(exc),
+            success=False,
+            duration_s=0,
+            error=str(exc),
         )
 
     return StepResult(
-        success=False, duration_s=0,
+        success=False,
+        duration_s=0,
         error=f"Unsupported type '{entry.type}' for action '{step.action}'",
     )
 
@@ -177,7 +192,8 @@ def _scripted_manipulation(
     body_id = _find_body_id(model, step.equipment_id)
     if body_id < 0:
         return StepResult(
-            success=False, duration_s=0,
+            success=False,
+            duration_s=0,
             error=f"Body '{step.equipment_id}' not found in scene",
         )
 
@@ -251,19 +267,22 @@ def _sim_camera_inspect(
     camera_id = _find_camera_id(model, step.equipment_id)
     if camera_id < 0:
         return StepResult(
-            success=False, duration_s=0.1,
+            success=False,
+            duration_s=0.1,
             error=f"Camera '{step.equipment_id}' not found in scene",
         )
 
     visible = _check_camera_fov(
-        model, data, camera_id, target_pos, entry,
+        model,
+        data,
+        camera_id,
+        target_pos,
+        entry,
     )
     return StepResult(
         success=visible,
         duration_s=0.1,
-        error=None if visible else (
-            f"Target '{step.target}' not in camera FOV"
-        ),
+        error=None if visible else (f"Target '{step.target}' not in camera FOV"),
     )
 
 
@@ -300,7 +319,7 @@ def _find_camera_id(model: mujoco.MjModel, name: str) -> int:
 
 
 def _check_camera_fov(
-    model: mujoco.MjModel,
+    _model: mujoco.MjModel,
     data: mujoco.MjData,
     camera_id: int,
     target_pos: tuple[float, float, float],
@@ -330,9 +349,7 @@ def _check_camera_fov(
 
     to_target = target - cam_pos
     cam_dir = data.cam_xmat[camera_id].reshape(3, 3)[:, 2]
-    cos_angle = float(
-        np.dot(to_target, -cam_dir) / (np.linalg.norm(to_target) + 1e-8)
-    )
+    cos_angle = float(np.dot(to_target, -cam_dir) / (np.linalg.norm(to_target) + 1e-8))
     angle_deg = float(np.degrees(np.arccos(np.clip(cos_angle, -1, 1))))
 
     return angle_deg < fov_deg / 2

@@ -37,9 +37,7 @@ class TestSpaceModels:
 
     def test_reference_calibration_rejects_zero_distance(self) -> None:
         with pytest.raises(ValueError):
-            ReferenceCalibration(
-                point_a=(0, 0, 0), point_b=(1, 0, 0), real_distance_m=0.0
-            )
+            ReferenceCalibration(point_a=(0, 0, 0), point_b=(1, 0, 0), real_distance_m=0.0)
 
     def test_dimensions_valid(self) -> None:
         dims = Dimensions(width_m=6.0, length_m=5.0, ceiling_m=3.0, area_m2=30.0)
@@ -72,9 +70,7 @@ class TestSpaceModels:
 
     def test_existing_equipment_rejects_invalid_confidence(self) -> None:
         with pytest.raises(ValueError):
-            ExistingEquipment(
-                name="x", category="y", position=(0, 0, 0), confidence=1.5
-            )
+            ExistingEquipment(name="x", category="y", position=(0, 0, 0), confidence=1.5)
 
     def test_scene_analysis_defaults_empty(self) -> None:
         analysis = SceneAnalysis()
@@ -120,9 +116,7 @@ class TestRecommendationModels:
         assert step.action == "pick"
 
     def test_workflow_step_wait_no_equipment(self) -> None:
-        step = WorkflowStep(
-            order=5, action="wait", target="next_item", duration_s=10.0
-        )
+        step = WorkflowStep(order=5, action="wait", target="next_item", duration_s=10.0)
         assert step.equipment_id is None
 
     def test_work_object_valid(self) -> None:
@@ -149,13 +143,14 @@ class TestRecommendationModels:
             target_positions={"table_1": (1.0, 1.0, 0.85)},
             workflow_steps=[
                 WorkflowStep(
-                    order=1, action="pick", equipment_id="franka_panda",
-                    target="table_1", duration_s=3.0,
+                    order=1,
+                    action="pick",
+                    equipment_id="franka_panda",
+                    target="table_1",
+                    duration_s=3.0,
                 )
             ],
-            expected_metrics=ExpectedMetrics(
-                cycle_time_s=15.0, throughput_per_hour=240.0
-            ),
+            expected_metrics=ExpectedMetrics(cycle_time_s=15.0, throughput_per_hour=240.0),
         )
         assert len(rec.equipment) == 1
 
@@ -168,9 +163,7 @@ class TestSimulationModels:
         assert result.collision_count == 0
 
     def test_step_result_failure(self) -> None:
-        result = StepResult(
-            success=False, duration_s=0.0, error="IK solver failed"
-        )
+        result = StepResult(success=False, duration_s=0.0, error="IK solver failed")
         assert result.error is not None
 
     def test_sim_metrics_valid(self) -> None:
@@ -205,9 +198,7 @@ class TestIterationModels:
 
     def test_scene_corrections_with_changes(self) -> None:
         corrections = SceneCorrections(
-            position_changes=[
-                PositionChange(equipment_id="franka", new_position=(3.0, 2.0, 0.0))
-            ],
+            position_changes=[PositionChange(equipment_id="franka", new_position=(3.0, 2.0, 0.0))],
             remove_equipment=["old_cam"],
         )
         assert len(corrections.position_changes) == 1

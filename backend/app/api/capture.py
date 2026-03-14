@@ -2,12 +2,13 @@
 
 import uuid
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from backend.app.core.claude import get_claude_client
-from backend.app.models.space import ReferenceCalibration, SpaceModel
+from backend.app.models.space import ReferenceCalibration, SceneReconstruction, SpaceModel
 from backend.app.services.project_status import (
     advance_phase,
     create_project_status,
@@ -26,7 +27,7 @@ router = APIRouter(prefix="/api/capture", tags=["capture"])
 
 @router.post("")
 async def upload_photos(
-    photos: list[UploadFile] = File(...),
+    photos: Annotated[list[UploadFile], File(...)],
 ) -> dict:
     """Upload room photos and start reconstruction.
 
@@ -93,7 +94,8 @@ async def calibrate_and_analyze(
 
     space_path = project_dir / "space_model.json"
     space_path.write_text(
-        space_model.model_dump_json(indent=2), encoding="utf-8",
+        space_model.model_dump_json(indent=2),
+        encoding="utf-8",
     )
     advance_phase(project_id, "calibrate")
 
@@ -134,7 +136,6 @@ async def get_mesh(project_id: str) -> FileResponse:
     return FileResponse(mesh_path, media_type="application/octet-stream")
 
 
-
 def _list_photos(photos_dir: Path) -> list[Path]:
     """List all image files in a directory.
 
@@ -145,15 +146,12 @@ def _list_photos(photos_dir: Path) -> list[Path]:
         Sorted list of image file paths.
     """
     image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".tiff"}
-    return sorted(
-        f for f in photos_dir.iterdir()
-        if f.suffix.lower() in image_exts
-    )
+    return sorted(f for f in photos_dir.iterdir() if f.suffix.lower() in image_exts)
 
 
 def _save_reconstruction_meta(
     project_dir: Path,
-    reconstruction: "SceneReconstruction",
+    reconstruction: SceneReconstruction,
 ) -> None:
     """Save reconstruction metadata to project directory.
 
@@ -161,15 +159,15 @@ def _save_reconstruction_meta(
         project_dir: Project directory.
         reconstruction: Reconstruction data to save.
     """
-    from backend.app.models.space import SceneReconstruction
 
     meta_path = project_dir / "reconstruction_meta.json"
     meta_path.write_text(
-        reconstruction.model_dump_json(indent=2), encoding="utf-8",
+        reconstruction.model_dump_json(indent=2),
+        encoding="utf-8",
     )
 
 
-def _load_reconstruction_meta(project_dir: Path) -> "SceneReconstruction":
+def _load_reconstruction_meta(project_dir: Path) -> SceneReconstruction:
     """Load reconstruction metadata from project directory.
 
     Args:
@@ -185,9 +183,5 @@ def _load_reconstruction_meta(project_dir: Path) -> "SceneReconstruction":
 
     meta_path = project_dir / "reconstruction_meta.json"
     if not meta_path.exists():
-        raise HTTPException(
-            404, f"Reconstruction not found in project {project_dir.name}"
-        )
-    return SceneReconstruction.model_validate_json(
-        meta_path.read_text(encoding="utf-8")
-    )
+        raise HTTPException(404, f"Reconstruction not found in project {project_dir.name}")
+    return SceneReconstruction.model_validate_json(meta_path.read_text(encoding="utf-8"))

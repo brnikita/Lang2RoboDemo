@@ -49,3 +49,29 @@ markers = [
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "T20",  # flake8-print
+    "C90",  # mccabe complexity
+    "ANN",  # flake8-annotations
+    "RET",  # flake8-return
+    "ARG",  # flake8-unused-arguments
+]
+ignore = [
+    "ANN204",  # missing return type for __init__
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+"backend/tests/*" = ["ANN", "ARG"]

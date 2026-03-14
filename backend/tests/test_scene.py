@@ -1,6 +1,5 @@
 """Tests for MJCF scene generation."""
 
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from backend.app.models.equipment import EquipmentEntry, MjcfSource
@@ -62,13 +61,16 @@ def _make_recommendation() -> Recommendation:
         target_positions={"table_1": (1.0, 1.0, 0.85)},
         workflow_steps=[
             WorkflowStep(
-                order=1, action="pick",
+                order=1,
+                action="pick",
                 equipment_id="franka_emika_panda",
-                target="table_1", duration_s=3.0,
+                target="table_1",
+                duration_s=3.0,
             ),
         ],
         expected_metrics=ExpectedMetrics(
-            cycle_time_s=3.0, throughput_per_hour=1200,
+            cycle_time_s=3.0,
+            throughput_per_hour=1200,
         ),
     )
 
@@ -77,15 +79,19 @@ class TestGenerateMjcfScene:
     """Tests for MJCF scene generation."""
 
     def test_generates_valid_xml(
-        self, sample_space_model, tmp_path: Path,
+        self,
+        sample_space_model,
+        tmp_path: Path,
     ) -> None:
         catalog = _make_catalog()
         recommendation = _make_recommendation()
         output = tmp_path / "scene.xml"
 
         generate_mjcf_scene(
-            sample_space_model, recommendation,
-            model_dirs={}, catalog=catalog,
+            sample_space_model,
+            recommendation,
+            model_dirs={},
+            catalog=catalog,
             output_path=output,
         )
 
@@ -94,15 +100,19 @@ class TestGenerateMjcfScene:
         assert "<mujoco" in content
 
     def test_contains_work_objects(
-        self, sample_space_model, tmp_path: Path,
+        self,
+        sample_space_model,
+        tmp_path: Path,
     ) -> None:
         catalog = _make_catalog()
         recommendation = _make_recommendation()
         output = tmp_path / "scene.xml"
 
         generate_mjcf_scene(
-            sample_space_model, recommendation,
-            model_dirs={}, catalog=catalog,
+            sample_space_model,
+            recommendation,
+            model_dirs={},
+            catalog=catalog,
             output_path=output,
         )
 
@@ -111,15 +121,19 @@ class TestGenerateMjcfScene:
         assert "item_1" in content
 
     def test_contains_equipment_body(
-        self, sample_space_model, tmp_path: Path,
+        self,
+        sample_space_model,
+        tmp_path: Path,
     ) -> None:
         catalog = _make_catalog()
         recommendation = _make_recommendation()
         output = tmp_path / "scene.xml"
 
         generate_mjcf_scene(
-            sample_space_model, recommendation,
-            model_dirs={}, catalog=catalog,
+            sample_space_model,
+            recommendation,
+            model_dirs={},
+            catalog=catalog,
             output_path=output,
         )
 
@@ -127,15 +141,19 @@ class TestGenerateMjcfScene:
         assert "franka_emika_panda" in content
 
     def test_contains_camera(
-        self, sample_space_model, tmp_path: Path,
+        self,
+        sample_space_model,
+        tmp_path: Path,
     ) -> None:
         catalog = _make_catalog()
         recommendation = _make_recommendation()
         output = tmp_path / "scene.xml"
 
         generate_mjcf_scene(
-            sample_space_model, recommendation,
-            model_dirs={}, catalog=catalog,
+            sample_space_model,
+            recommendation,
+            model_dirs={},
+            catalog=catalog,
             output_path=output,
         )
 
@@ -143,15 +161,19 @@ class TestGenerateMjcfScene:
         assert "camera_overhead" in content
 
     def test_work_objects_have_freejoints(
-        self, sample_space_model, tmp_path: Path,
+        self,
+        sample_space_model,
+        tmp_path: Path,
     ) -> None:
         catalog = _make_catalog()
         recommendation = _make_recommendation()
         output = tmp_path / "scene.xml"
 
         generate_mjcf_scene(
-            sample_space_model, recommendation,
-            model_dirs={}, catalog=catalog,
+            sample_space_model,
+            recommendation,
+            model_dirs={},
+            catalog=catalog,
             output_path=output,
         )
 
