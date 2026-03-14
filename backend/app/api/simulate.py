@@ -117,6 +117,7 @@ def _run_visual_in_thread(
         catalog: Equipment catalog keyed by ID.
     """
     import asyncio
+    import logging
 
     loop = asyncio.new_event_loop()
     try:
@@ -128,6 +129,8 @@ def _run_visual_in_thread(
                 recommendation.target_positions,
             ),
         )
+    except Exception:
+        logging.getLogger(__name__).exception("Visual simulation failed")
     finally:
         loop.close()
 

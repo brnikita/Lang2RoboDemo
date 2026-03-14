@@ -397,6 +397,42 @@ def _inline_robot_model(
                 continue
             wrapper.append(child)
 
+    _ensure_ee_site(wrapper)
+
+
+def _ensure_ee_site(wrapper: ET.Element) -> None:
+    """Add end-effector site to deepest body if none exists.
+
+    Args:
+        wrapper: Robot wrapper body element.
+    """
+    if wrapper.find(".//site") is not None:
+        return
+    deepest = _find_deepest_body(wrapper)
+    if deepest is not None:
+        ET.SubElement(
+            deepest,
+            "site",
+            {
+                "name": "end_effector",
+                "pos": "0 0 0",
+                "size": "0.01",
+            },
+        )
+
+
+def _find_deepest_body(element: ET.Element) -> ET.Element | None:
+    """Find the deepest body in a kinematic chain.
+
+    Args:
+        element: Root element to search.
+
+    Returns:
+        Deepest body element, or None.
+    """
+    bodies = list(element.iter("body"))
+    return bodies[-1] if bodies else None
+
 
 def _resolve_meshdir(
     robot_root: ET.Element,
