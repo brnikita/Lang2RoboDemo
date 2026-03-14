@@ -24,7 +24,7 @@ env/
 
 # Project data (large files)
 data/projects/*/
-models/
+/models/
 
 # Frontend
 frontend/node_modules/
