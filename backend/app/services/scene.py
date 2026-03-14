@@ -785,22 +785,27 @@ def _append_unique_children(
             existing_keys.add(key)
 
 
-def _child_key(element: ET.Element) -> tuple[str, str, str]:
+def _child_key(element: ET.Element) -> tuple[str, ...]:
     """Create a unique key for an XML element.
 
-    Uses tag + name + class to distinguish elements like
-    materials with same class but different names.
+    Uses tag + name + class + file to distinguish elements.
+    File is needed for mesh elements without name attributes.
 
     Args:
         element: XML element.
 
     Returns:
-        (tag, name, class) tuple.
+        Tuple key for deduplication.
     """
-    return (element.tag, element.get("name", ""), element.get("class", ""))
+    return (
+        element.tag,
+        element.get("name", ""),
+        element.get("class", ""),
+        element.get("file", ""),
+    )
 
 
-def _collect_child_keys(section: ET.Element) -> set[tuple[str, str, str]]:
+def _collect_child_keys(section: ET.Element) -> set[tuple[str, ...]]:
     """Collect unique keys for children of a section.
 
     Args:
