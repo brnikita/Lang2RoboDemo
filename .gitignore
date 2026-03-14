@@ -20,7 +20,6 @@ env/
 *.swo
 
 # Environment
-.env
 
 # Project data (large files)
 data/projects/*/
@@ -39,3 +38,5 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+config.bat
+node_modules
