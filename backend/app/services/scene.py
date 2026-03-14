@@ -2,7 +2,6 @@
 
 import logging
 import math
-import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -322,17 +321,21 @@ def _add_new_equipment(
 
 
 def _add_manipulator_to_scene(
-    _root: ET.Element,
+    root: ET.Element,
     worldbody: ET.Element,
     placement: EquipmentPlacement,
     body_name: str,
     model_dirs: dict[str, Path],
-    scene_dir: Path,
+    _scene_dir: Path,
 ) -> None:
-    """Include real MJCF model for a manipulator.
+    """Inline real MJCF model for a manipulator.
+
+    Parses the robot MJCF file, merges top-level sections (compiler,
+    default, asset, actuator, etc.) into the scene root, and places
+    the robot's body tree inside a positioning wrapper body.
 
     Args:
-        _root: Root mujoco element (unused, reserved for future).
+        root: Root mujoco element for merging top-level sections.
         worldbody: Worldbody XML element.
         placement: Equipment placement data.
         body_name: Unique body name.
@@ -343,21 +346,131 @@ def _add_manipulator_to_scene(
     mjcf_file = find_mjcf_in_dir(model_dir) if model_dir else None
 
     if mjcf_file:
-        try:
-            rel_path = os.path.relpath(mjcf_file, scene_dir).replace("\\", "/")
-        except ValueError:
-            rel_path = str(mjcf_file).replace("\\", "/")
-
-        pos = _format_pos(placement.position)
-        euler = f"0 0 {math.radians(placement.orientation_deg):.4f}"
-        body = ET.SubElement(
+        _inline_robot_model(
+            root,
             worldbody,
-            "body",
-            {"name": body_name, "pos": pos, "euler": euler},
+            mjcf_file,
+            placement,
+            body_name,
         )
-        ET.SubElement(body, "include", {"file": rel_path})
     else:
         _add_fallback_box(worldbody, placement, body_name)
+
+
+def _inline_robot_model(
+    root: ET.Element,
+    worldbody: ET.Element,
+    mjcf_file: Path,
+    placement: EquipmentPlacement,
+    body_name: str,
+) -> None:
+    """Parse robot MJCF and inline it into the scene.
+
+    Merges top-level sections into root and places body tree
+    inside a wrapper body at the desired position.
+
+    Args:
+        root: Root mujoco element.
+        worldbody: Worldbody XML element.
+        mjcf_file: Path to robot MJCF file.
+        placement: Equipment placement data.
+        body_name: Unique body name.
+    """
+    robot_tree = ET.parse(str(mjcf_file))
+    robot_root = robot_tree.getroot()
+
+    _resolve_meshdir(robot_root, mjcf_file.parent)
+    _merge_top_level_sections(root, robot_root)
+
+    pos = _format_pos(placement.position)
+    euler = f"0 0 {math.radians(placement.orientation_deg):.4f}"
+    wrapper = ET.SubElement(
+        worldbody,
+        "body",
+        {"name": body_name, "pos": pos, "euler": euler},
+    )
+
+    robot_wb = robot_root.find("worldbody")
+    if robot_wb is not None:
+        for child in robot_wb:
+            if child.tag == "light":
+                continue
+            wrapper.append(child)
+
+
+def _resolve_meshdir(
+    robot_root: ET.Element,
+    model_dir: Path,
+) -> None:
+    """Resolve meshdir so mesh paths are absolute.
+
+    Updates mesh file attributes in asset to use absolute paths
+    based on the compiler meshdir setting.
+
+    Args:
+        robot_root: Robot MJCF root element.
+        model_dir: Directory containing the robot MJCF file.
+    """
+    compiler = robot_root.find("compiler")
+    meshdir = model_dir.resolve()
+    if compiler is not None:
+        raw = compiler.get("meshdir")
+        if raw:
+            meshdir = (model_dir / raw).resolve()
+    asset = robot_root.find("asset")
+    if asset is None:
+        return
+    for mesh in asset.findall("mesh"):
+        file_attr = mesh.get("file")
+        if file_attr and not Path(file_attr).is_absolute():
+            abs_path = str(meshdir / file_attr).replace("\\", "/")
+            mesh.set("file", abs_path)
+
+
+_MERGEABLE_SECTIONS = [
+    "compiler",
+    "option",
+    "size",
+    "default",
+    "asset",
+    "tendon",
+    "equality",
+    "actuator",
+    "sensor",
+    "keyframe",
+    "contact",
+]
+
+
+def _merge_top_level_sections(
+    scene_root: ET.Element,
+    robot_root: ET.Element,
+) -> None:
+    """Merge robot top-level MJCF sections into the scene root.
+
+    For container sections (asset, actuator, etc.), children are
+    appended. For singleton sections (compiler, option), they are
+    added only if not already present.
+
+    Args:
+        scene_root: Scene mujoco root element.
+        robot_root: Robot mujoco root element.
+    """
+    singleton_tags = {"compiler", "option", "size"}
+    for tag in _MERGEABLE_SECTIONS:
+        robot_section = robot_root.find(tag)
+        if robot_section is None:
+            continue
+        scene_section = scene_root.find(tag)
+        if tag in singleton_tags:
+            if scene_section is None:
+                scene_root.insert(0, robot_section)
+        else:
+            if scene_section is None:
+                scene_root.append(robot_section)
+            else:
+                for child in robot_section:
+                    scene_section.append(child)
 
 
 def _add_conveyor_to_scene(
