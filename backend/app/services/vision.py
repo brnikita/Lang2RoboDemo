@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 
 from backend.app.core.claude import ClaudeClient
+from backend.app.core.config import get_settings
 from backend.app.core.prompts import load_prompt
 from backend.app.models.space import (
     SceneAnalysis,
@@ -48,6 +49,7 @@ async def analyze_scene(
                 system=system_prompt,
                 images=photos,
                 text=text,
+                model=get_settings().vision_model,
             )
             return _parse_analysis_response(response)
         except (ValueError, json.JSONDecodeError) as exc:

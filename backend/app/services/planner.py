@@ -4,6 +4,7 @@ import json
 import logging
 
 from backend.app.core.claude import ClaudeClient
+from backend.app.core.config import get_settings
 from backend.app.core.prompts import load_prompt
 from backend.app.models.equipment import EquipmentEntry
 from backend.app.models.recommendation import Recommendation
@@ -49,6 +50,7 @@ async def generate_recommendation(
             response = await client.send_message(
                 system=system_prompt,
                 messages=[{"role": "user", "content": context}],
+                model=get_settings().planning_model,
             )
             return parse_and_validate(response, catalog)
         except (ValueError, KeyError, json.JSONDecodeError) as exc:

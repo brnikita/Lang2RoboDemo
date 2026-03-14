@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from backend.app.core.claude import ClaudeClient
+from backend.app.core.config import get_settings
 from backend.app.core.prompts import load_prompt
 from backend.app.models.equipment import EquipmentEntry
 from backend.app.models.iteration import (
@@ -130,6 +131,7 @@ async def iterate_once(
             response = await client.send_message(
                 system=system_prompt,
                 messages=[{"role": "user", "content": context}],
+                model=get_settings().planning_model,
             )
             return _parse_corrections(response, catalog)
         except (ValueError, KeyError, json.JSONDecodeError) as exc:
