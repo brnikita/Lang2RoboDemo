@@ -1,16 +1,13 @@
 """Recommendation API — AI-generated automation plans."""
 
-import json
-from pathlib import Path
-
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from backend.app.core.claude import get_claude_client
-from backend.app.core.config import get_settings
 from backend.app.models.recommendation import Recommendation
 from backend.app.models.space import SpaceModel
 from backend.app.services.planner import generate_recommendation
+from backend.app.services.project_status import advance_phase, get_project_dir
 
 __all__ = ["router"]
 
@@ -49,6 +46,7 @@ async def create_recommendation(
     )
 
     _save_recommendation(request.project_id, recommendation)
+    advance_phase(request.project_id, "recommend")
     return recommendation
 
 
@@ -64,8 +62,7 @@ def _load_space_model(project_id: str) -> SpaceModel:
     Raises:
         HTTPException: If SpaceModel not found.
     """
-    settings = get_settings()
-    path = settings.DATA_DIR / "projects" / project_id / "space_model.json"
+    path = get_project_dir(project_id) / "space_model.json"
     if not path.exists():
         raise HTTPException(
             404,
@@ -84,8 +81,7 @@ def _save_recommendation(
         project_id: Project identifier.
         recommendation: Recommendation to save.
     """
-    settings = get_settings()
-    rec_dir = settings.DATA_DIR / "projects" / project_id / "recommendation"
+    rec_dir = get_project_dir(project_id) / "recommendation"
     rec_dir.mkdir(parents=True, exist_ok=True)
     rec_path = rec_dir / "recommendation.json"
     rec_path.write_text(

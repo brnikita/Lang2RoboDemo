@@ -7,12 +7,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.app.core.claude import get_claude_client
-from backend.app.core.config import get_settings
 from backend.app.models.iteration import IterationLog
 from backend.app.models.recommendation import Recommendation
 from backend.app.models.simulation import SimResult
 from backend.app.services.catalog import load_equipment_catalog
 from backend.app.services.iteration import run_iteration_loop
+from backend.app.services.project_status import advance_phase, get_project_dir
 
 __all__ = ["router"]
 
@@ -70,6 +70,7 @@ async def iterate(
     )
 
     _save_iteration_results(project_id, result, history)
+    advance_phase(project_id, "iterate")
 
     converged = (
         result.metrics.success_rate >= 0.95
@@ -81,19 +82,6 @@ async def iterate(
         iterations_run=len(history),
         converged=converged,
     )
-
-
-def _get_project_dir(project_id: str) -> Path:
-    """Get project data directory.
-
-    Args:
-        project_id: Project identifier.
-
-    Returns:
-        Project directory path.
-    """
-    settings = get_settings()
-    return settings.DATA_DIR / "projects" / project_id
 
 
 def _find_latest_scene(project_id: str) -> Path:
@@ -108,7 +96,7 @@ def _find_latest_scene(project_id: str) -> Path:
     Raises:
         HTTPException: If no scene found.
     """
-    scenes_dir = _get_project_dir(project_id) / "scenes"
+    scenes_dir = get_project_dir(project_id) / "scenes"
     if not scenes_dir.exists():
         raise HTTPException(404, f"No scenes for {project_id}")
     xmls = sorted(scenes_dir.glob("v*.xml"))
@@ -130,7 +118,7 @@ def _load_recommendation(project_id: str) -> Recommendation:
         HTTPException: If not found.
     """
     path = (
-        _get_project_dir(project_id) / "recommendation" / "recommendation.json"
+        get_project_dir(project_id) / "recommendation" / "recommendation.json"
     )
     if not path.exists():
         raise HTTPException(404, f"Recommendation not found for {project_id}")
@@ -151,7 +139,7 @@ def _save_iteration_results(
         result: Final simulation result.
         history: Iteration history.
     """
-    sim_dir = _get_project_dir(project_id) / "simulations"
+    sim_dir = get_project_dir(project_id) / "simulations"
     sim_dir.mkdir(parents=True, exist_ok=True)
 
     (sim_dir / "final_result.json").write_text(

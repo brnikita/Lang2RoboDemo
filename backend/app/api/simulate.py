@@ -1,17 +1,16 @@
 """Simulation API — scene building and MuJoCo runs."""
 
-import json
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from backend.app.core.config import get_settings
 from backend.app.models.recommendation import Recommendation
 from backend.app.models.space import SpaceModel
 from backend.app.services.catalog import load_equipment_catalog
 from backend.app.services.downloader import download_equipment_models
 from backend.app.models.simulation import SimResult
+from backend.app.services.project_status import advance_phase, get_project_dir
 from backend.app.services.scene import generate_mjcf_scene, validate_mjcf
 from backend.app.services.simulator import run_simulation
 
@@ -53,7 +52,7 @@ async def build_scene(project_id: str) -> BuildSceneResponse:
     equipment_ids = [p.equipment_id for p in recommendation.equipment]
     model_dirs = await download_equipment_models(equipment_ids)
 
-    scenes_dir = _get_project_dir(project_id) / "scenes"
+    scenes_dir = get_project_dir(project_id) / "scenes"
     scene_path = scenes_dir / "v1.xml"
 
     generate_mjcf_scene(
@@ -63,25 +62,14 @@ async def build_scene(project_id: str) -> BuildSceneResponse:
     valid = validate_mjcf(scene_path)
     total_objects = sum(obj.count for obj in recommendation.work_objects)
 
+    advance_phase(project_id, "build-scene")
+
     return BuildSceneResponse(
         scene_path=str(scene_path),
         valid=valid,
         equipment_count=len(recommendation.equipment),
         work_object_count=total_objects,
     )
-
-
-def _get_project_dir(project_id: str) -> Path:
-    """Get project data directory.
-
-    Args:
-        project_id: Project identifier.
-
-    Returns:
-        Project directory path.
-    """
-    settings = get_settings()
-    return settings.DATA_DIR / "projects" / project_id
 
 
 @router.post("/{project_id}/view")
@@ -132,7 +120,7 @@ def _load_space_model(project_id: str) -> SpaceModel:
     Raises:
         HTTPException: If not found.
     """
-    path = _get_project_dir(project_id) / "space_model.json"
+    path = get_project_dir(project_id) / "space_model.json"
     if not path.exists():
         raise HTTPException(404, f"SpaceModel not found for {project_id}")
     return SpaceModel.model_validate_json(path.read_text(encoding="utf-8"))
@@ -159,11 +147,12 @@ async def simulate(project_id: str) -> SimResult:
         recommendation.target_positions,
     )
 
-    sim_dir = _get_project_dir(project_id) / "simulations"
+    sim_dir = get_project_dir(project_id) / "simulations"
     sim_dir.mkdir(parents=True, exist_ok=True)
     (sim_dir / "latest.json").write_text(
         result.model_dump_json(indent=2), encoding="utf-8",
     )
+    advance_phase(project_id, "simulate")
     return result
 
 
@@ -179,7 +168,7 @@ def _find_latest_scene(project_id: str) -> Path:
     Raises:
         HTTPException: If no scene found.
     """
-    scenes_dir = _get_project_dir(project_id) / "scenes"
+    scenes_dir = get_project_dir(project_id) / "scenes"
     if not scenes_dir.exists():
         raise HTTPException(404, f"No scenes for {project_id}")
     xmls = sorted(scenes_dir.glob("v*.xml"))
@@ -201,7 +190,7 @@ def _load_recommendation(project_id: str) -> Recommendation:
         HTTPException: If not found.
     """
     path = (
-        _get_project_dir(project_id) / "recommendation" / "recommendation.json"
+        get_project_dir(project_id) / "recommendation" / "recommendation.json"
     )
     if not path.exists():
         raise HTTPException(404, f"Recommendation not found for {project_id}")

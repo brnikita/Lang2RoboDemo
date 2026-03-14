@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.app.api.capture import router as capture_router
 from backend.app.api.iterate import router as iterate_router
+from backend.app.api.projects import router as projects_router
 from backend.app.api.recommend import router as recommend_router
 from backend.app.api.simulate import router as simulate_router
 
@@ -36,6 +37,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    application.include_router(projects_router)
     application.include_router(capture_router)
     application.include_router(recommend_router)
     application.include_router(simulate_router)
