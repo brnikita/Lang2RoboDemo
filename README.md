@@ -35,22 +35,76 @@ Room photos + scenario text
 
 **Minimum:** Python 3.11+, 8 GB RAM, any CPU. GPU not required.
 
-## Quick start
-
-```bash
-git clone https://github.com/user/lang2robo
-cd lang2robo
-pip install -e ".[training]"   # or -e . without training extras
-cd frontend && npm install && npm run build && cd ..
-cp .env.example .env           # set ANTHROPIC_API_KEY
-uvicorn backend.app.main:app --reload
-# Open http://localhost:8000
-```
-
 ## Environment
 
+Copy `.env.example` and fill in your OpenRouter API key:
+
+```bash
+cp .env.example .env
+```
+
 ```env
-ANTHROPIC_API_KEY=sk-ant-...
+OPENROUTER_API_KEY=sk-or-...
+OPENROUTER_MODEL=anthropic/claude-sonnet-4.6    # optional, default
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1  # optional, default
+```
+
+---
+
+## Development mode
+
+Two processes: backend with hot-reload + frontend dev server with HMR.
+
+**1. Install dependencies:**
+
+```bash
+pip install -e ".[dev]"
+cd frontend && npm install && cd ..
+```
+
+**2. Run backend (terminal 1):**
+
+```bash
+python -m uvicorn backend.app.main:app --reload
+```
+
+Backend starts at **http://localhost:8000** (API under `/api`).
+
+**3. Run frontend (terminal 2):**
+
+```bash
+cd frontend
+npm run dev
+```
+
+Frontend starts at **http://localhost:5173** with API proxy to `localhost:8000`.
+
+Open **http://localhost:5173** in the browser.
+
+---
+
+## Production mode (Docker)
+
+Single command — builds both backend and frontend, serves everything from one container.
+
+```bash
+docker compose up --build
+```
+
+App available at **http://localhost:8000**.
+
+Subsequent launches without code changes:
+
+```bash
+docker compose up
+```
+
+> If you changed code, add `--build` to rebuild the image.
+
+Stop:
+
+```bash
+docker compose down
 ```
 
 ## Project layout
