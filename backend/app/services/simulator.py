@@ -103,8 +103,33 @@ async def run_visual_simulation(
             )
             results.append(result)
 
+        _keep_viewer_open(viewer, model, data)
+
     metrics = compute_metrics(results)
     return SimResult(steps=results, metrics=metrics)
+
+
+def _keep_viewer_open(
+    viewer: _ViewerHandle,
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+) -> None:
+    """Keep viewer open after workflow completes.
+
+    Continues stepping physics and syncing the viewer
+    until the user closes the window.
+
+    Args:
+        viewer: MuJoCo passive viewer handle.
+        model: MuJoCo model.
+        data: MuJoCo simulation data.
+    """
+    import time
+
+    while viewer.is_running():
+        mujoco.mj_step(model, data)
+        viewer.sync()
+        time.sleep(model.opt.timestep)
 
 
 def compute_metrics(results: list[StepResult]) -> SimMetrics:
