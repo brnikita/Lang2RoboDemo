@@ -72,8 +72,5 @@ def validate_equipment_id(
         catalog = load_equipment_catalog()
     if equipment_id not in catalog:
         available = ", ".join(sorted(catalog.keys()))
-        raise KeyError(
-            f"Equipment '{equipment_id}' not found. "
-            f"Available: {available}"
-        )
+        raise KeyError(f"Equipment '{equipment_id}' not found. Available: {available}")
     return catalog[equipment_id]

@@ -42,7 +42,9 @@ async def create_recommendation(
     client = get_claude_client()
 
     recommendation = await generate_recommendation(
-        client, space_model, request.scenario,
+        client,
+        space_model,
+        request.scenario,
     )
 
     _save_recommendation(request.project_id, recommendation)
@@ -66,14 +68,14 @@ def _load_space_model(project_id: str) -> SpaceModel:
     if not path.exists():
         raise HTTPException(
             404,
-            f"SpaceModel not found for project {project_id}. "
-            f"Run capture and calibration first.",
+            f"SpaceModel not found for project {project_id}. Run capture and calibration first.",
         )
     return SpaceModel.model_validate_json(path.read_text(encoding="utf-8"))
 
 
 def _save_recommendation(
-    project_id: str, recommendation: Recommendation,
+    project_id: str,
+    recommendation: Recommendation,
 ) -> None:
     """Save recommendation to project directory.
 
@@ -85,5 +87,6 @@ def _save_recommendation(
     rec_dir.mkdir(parents=True, exist_ok=True)
     rec_path = rec_dir / "recommendation.json"
     rec_path.write_text(
-        recommendation.model_dump_json(indent=2), encoding="utf-8",
+        recommendation.model_dump_json(indent=2),
+        encoding="utf-8",
     )

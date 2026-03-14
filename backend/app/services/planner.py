@@ -57,13 +57,14 @@ async def generate_recommendation(
             last_error = exc
             logger.warning(
                 "Recommendation attempt %d/%d failed: %s",
-                attempt + 1, _MAX_RETRIES + 1, exc,
+                attempt + 1,
+                _MAX_RETRIES + 1,
+                exc,
             )
             context = _build_retry_context(context, exc)
 
     raise ValueError(
-        f"Failed to generate valid recommendation after "
-        f"{_MAX_RETRIES + 1} attempts: {last_error}"
+        f"Failed to generate valid recommendation after {_MAX_RETRIES + 1} attempts: {last_error}"
     )
 
 
@@ -151,8 +152,7 @@ def _validate_workflow_refs(rec: Recommendation) -> None:
     for step in rec.workflow_steps:
         if step.equipment_id and step.equipment_id not in placed_ids:
             raise ValueError(
-                f"Workflow step {step.order} references "
-                f"'{step.equipment_id}' not in equipment list"
+                f"Workflow step {step.order} references '{step.equipment_id}' not in equipment list"
             )
         if step.target not in rec.target_positions:
             raise ValueError(
@@ -188,12 +188,8 @@ def _format_catalog(
     """
     lines: list[str] = []
     for entry_id, entry in sorted(catalog.items()):
-        specs_str = ", ".join(
-            f"{k}: {v}" for k, v in entry.specs.items()
-        )
-        lines.append(
-            f"- **{entry_id}** ({entry.type}): {entry.name} — {specs_str}"
-        )
+        specs_str = ", ".join(f"{k}: {v}" for k, v in entry.specs.items())
+        lines.append(f"- **{entry_id}** ({entry.type}): {entry.name} — {specs_str}")
     return "\n".join(lines)
 
 

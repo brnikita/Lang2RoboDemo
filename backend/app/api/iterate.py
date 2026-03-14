@@ -66,16 +66,17 @@ async def iterate(
     client = get_claude_client()
 
     result, history = await run_iteration_loop(
-        scene_path, recommendation, catalog, client, max_iter,
+        scene_path,
+        recommendation,
+        catalog,
+        client,
+        max_iter,
     )
 
     _save_iteration_results(project_id, result, history)
     advance_phase(project_id, "iterate")
 
-    converged = (
-        result.metrics.success_rate >= 0.95
-        and result.metrics.collision_count == 0
-    )
+    converged = result.metrics.success_rate >= 0.95 and result.metrics.collision_count == 0
     return IterateResponse(
         result=result,
         history=history,
@@ -117,9 +118,7 @@ def _load_recommendation(project_id: str) -> Recommendation:
     Raises:
         HTTPException: If not found.
     """
-    path = (
-        get_project_dir(project_id) / "recommendation" / "recommendation.json"
-    )
+    path = get_project_dir(project_id) / "recommendation" / "recommendation.json"
     if not path.exists():
         raise HTTPException(404, f"Recommendation not found for {project_id}")
     return Recommendation.model_validate_json(
@@ -143,10 +142,12 @@ def _save_iteration_results(
     sim_dir.mkdir(parents=True, exist_ok=True)
 
     (sim_dir / "final_result.json").write_text(
-        result.model_dump_json(indent=2), encoding="utf-8",
+        result.model_dump_json(indent=2),
+        encoding="utf-8",
     )
 
     history_data = [h.model_dump() for h in history]
     (sim_dir / "iteration_history.json").write_text(
-        json.dumps(history_data, indent=2), encoding="utf-8",
+        json.dumps(history_data, indent=2),
+        encoding="utf-8",
     )

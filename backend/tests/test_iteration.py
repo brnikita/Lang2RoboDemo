@@ -3,7 +3,7 @@
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from backend.app.models.iteration import PositionChange, SceneCorrections
+from backend.app.models.iteration import PositionChange
 from backend.app.models.simulation import SimMetrics
 from backend.app.services.iteration import (
     _apply_position_change,
@@ -18,25 +18,33 @@ class TestConvergenceCheck:
 
     def test_converged(self) -> None:
         metrics = SimMetrics(
-            cycle_time_s=10.0, success_rate=0.98, collision_count=0,
+            cycle_time_s=10.0,
+            success_rate=0.98,
+            collision_count=0,
         )
         assert _is_converged(metrics)
 
     def test_not_converged_low_success(self) -> None:
         metrics = SimMetrics(
-            cycle_time_s=10.0, success_rate=0.80, collision_count=0,
+            cycle_time_s=10.0,
+            success_rate=0.80,
+            collision_count=0,
         )
         assert not _is_converged(metrics)
 
     def test_not_converged_collisions(self) -> None:
         metrics = SimMetrics(
-            cycle_time_s=10.0, success_rate=0.98, collision_count=5,
+            cycle_time_s=10.0,
+            success_rate=0.98,
+            collision_count=5,
         )
         assert not _is_converged(metrics)
 
     def test_exact_threshold(self) -> None:
         metrics = SimMetrics(
-            cycle_time_s=10.0, success_rate=0.95, collision_count=0,
+            cycle_time_s=10.0,
+            success_rate=0.95,
+            collision_count=0,
         )
         assert _is_converged(metrics)
 

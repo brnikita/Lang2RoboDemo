@@ -18,9 +18,7 @@ def sample_dimensions() -> Dimensions:
 
 
 @pytest.fixture
-def sample_reconstruction(
-    tmp_path: Path, sample_dimensions: Dimensions
-) -> SceneReconstruction:
+def sample_reconstruction(tmp_path: Path, sample_dimensions: Dimensions) -> SceneReconstruction:
     """Create sample scene reconstruction for testing."""
     mesh = tmp_path / "mesh.obj"
     mjcf = tmp_path / "scene.xml"

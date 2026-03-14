@@ -28,17 +28,17 @@ fail() {
 
 if git diff --cached --name-only | grep -q '\.py$'; then
   step "Ruff lint (Python)"
-  if ruff check backend/ 2>/dev/null; then
+  if python -m ruff check backend/ 2>/dev/null; then
     pass "Ruff lint"
   else
-    fail "Ruff lint — run: ruff check backend/ --fix"
+    fail "Ruff lint — run: python -m ruff check backend/ --fix"
   fi
 
   step "Ruff format (Python)"
-  if ruff format --check backend/ 2>/dev/null; then
+  if python -m ruff format --check backend/ 2>/dev/null; then
     pass "Ruff format"
   else
-    fail "Ruff format — run: ruff format backend/"
+    fail "Ruff format — run: python -m ruff format backend/"
   fi
 
   step "No print() statements"

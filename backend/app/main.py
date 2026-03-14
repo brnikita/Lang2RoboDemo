@@ -64,7 +64,7 @@ def _mount_frontend(application: FastAPI) -> None:
     )
 
     @application.get("/{full_path:path}")
-    async def spa_fallback(request: Request, full_path: str) -> FileResponse:
+    async def spa_fallback(_request: Request, full_path: str) -> FileResponse:
         """Serve index.html for all non-API routes (SPA routing).
 
         Args:

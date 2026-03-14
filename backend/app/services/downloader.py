@@ -53,11 +53,13 @@ async def download_equipment_model(entry: EquipmentEntry) -> Path:
 
     if source.robot_descriptions_id:
         return _fetch_from_robot_descriptions(
-            source.robot_descriptions_id, cache_dir,
+            source.robot_descriptions_id,
+            cache_dir,
         )
     if source.menagerie_id:
         return _fetch_from_robot_descriptions_menagerie(
-            source.menagerie_id, cache_dir,
+            source.menagerie_id,
+            cache_dir,
         )
     if source.urdf_url:
         return await _fetch_from_url(source.urdf_url, cache_dir)
@@ -94,7 +96,8 @@ def _is_cached(cache_dir: Path) -> bool:
 
 
 def _fetch_from_robot_descriptions(
-    description_id: str, cache_dir: Path,
+    description_id: str,
+    cache_dir: Path,
 ) -> Path:
     """Fetch model from robot_descriptions package.
 
@@ -119,14 +122,16 @@ def _fetch_from_robot_descriptions(
     except Exception as exc:
         logger.warning(
             "Failed to load %s from robot_descriptions: %s",
-            description_id, exc,
+            description_id,
+            exc,
         )
 
     return cache_dir
 
 
 def _fetch_from_robot_descriptions_menagerie(
-    menagerie_id: str, cache_dir: Path,
+    menagerie_id: str,
+    cache_dir: Path,
 ) -> Path:
     """Fetch Menagerie model via robot_descriptions.
 
@@ -142,7 +147,8 @@ def _fetch_from_robot_descriptions_menagerie(
         return _fetch_from_robot_descriptions(desc_id, cache_dir)
 
     logger.warning(
-        "No robot_descriptions mapping for menagerie_id %s", menagerie_id,
+        "No robot_descriptions mapping for menagerie_id %s",
+        menagerie_id,
     )
     return cache_dir
 

@@ -8,6 +8,7 @@ from backend.app.core.claude import ClaudeClient
 from backend.app.core.config import get_settings
 from backend.app.core.prompts import load_prompt
 from backend.app.models.space import (
+    Dimensions,
     SceneAnalysis,
     SceneReconstruction,
     SpaceModel,
@@ -56,12 +57,13 @@ async def analyze_scene(
             last_error = exc
             logger.warning(
                 "Analysis attempt %d/%d failed: %s",
-                attempt + 1, _MAX_RETRIES + 1, exc,
+                attempt + 1,
+                _MAX_RETRIES + 1,
+                exc,
             )
 
     raise ValueError(
-        f"Failed to parse scene analysis after {_MAX_RETRIES + 1} attempts: "
-        f"{last_error}"
+        f"Failed to parse scene analysis after {_MAX_RETRIES + 1} attempts: {last_error}"
     )
 
 
@@ -88,7 +90,7 @@ def build_space_model(
     )
 
 
-def _format_analysis_request(dims: "Dimensions") -> str:
+def _format_analysis_request(dims: Dimensions) -> str:
     """Format the text portion of the vision analysis request.
 
     Args:
@@ -97,7 +99,6 @@ def _format_analysis_request(dims: "Dimensions") -> str:
     Returns:
         Formatted request text.
     """
-    from backend.app.models.space import Dimensions
 
     return (
         f"Room dimensions from 3D reconstruction:\n"

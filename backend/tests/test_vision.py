@@ -1,7 +1,6 @@
 """Tests for Claude Vision scene analysis."""
 
 from backend.app.models.space import (
-    Dimensions,
     ExistingEquipment,
     SceneAnalysis,
     Zone,
@@ -32,7 +31,8 @@ class TestBuildSpaceModel:
     """Tests for SpaceModel composition."""
 
     def test_merge_reconstruction_and_analysis(
-        self, sample_reconstruction,
+        self,
+        sample_reconstruction,
     ) -> None:
         analysis = SceneAnalysis(
             zones=[

@@ -4,12 +4,17 @@ Orchestrates: photos → feature extraction → matching → SfM → dense → m
 Uses pycolmap Python API — no CLI dependency.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
-import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    import pycolmap
 
 from backend.app.models.space import Dimensions, ReferenceCalibration, SceneReconstruction
 
@@ -64,8 +69,13 @@ async def reconstruct_scene(
 
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(
-        None, _run_pycolmap_pipeline,
-        photos_dir, db_path, sparse_dir, pointcloud_path, mesh_path,
+        None,
+        _run_pycolmap_pipeline,
+        photos_dir,
+        db_path,
+        sparse_dir,
+        pointcloud_path,
+        mesh_path,
     )
 
     _generate_base_mjcf(mesh_path, mjcf_path)
@@ -94,7 +104,8 @@ def calibrate_scale(
     """
     scale_factor = _compute_scale_factor(calibration)
     scaled_dims = _scale_dimensions(
-        reconstruction.dimensions, scale_factor,
+        reconstruction.dimensions,
+        scale_factor,
     )
     _apply_scale_to_mjcf(reconstruction.mjcf_path, scale_factor)
     if reconstruction.mesh_path.stat().st_size > 0:
@@ -146,19 +157,23 @@ def _run_pycolmap_pipeline(
     mapper_opts = pycolmap.IncrementalPipelineOptions()
     mapper_opts.min_num_matches = 10
     reconstructions = pycolmap.incremental_mapping(
-        db_str, photos_str, sparse_str, options=mapper_opts,
+        db_str,
+        photos_str,
+        sparse_str,
+        options=mapper_opts,
     )
 
     if not reconstructions:
         raise RuntimeError(
-            "SfM failed — no reconstruction produced. "
-            "Ensure photos have sufficient overlap."
+            "SfM failed — no reconstruction produced. Ensure photos have sufficient overlap."
         )
 
     best = max(reconstructions.values(), key=lambda r: r.num_points3D())
     logger.info(
         "SfM complete: %d reconstructions, best has %d images and %d points",
-        len(reconstructions), best.num_reg_images(), best.num_points3D(),
+        len(reconstructions),
+        best.num_reg_images(),
+        best.num_points3D(),
     )
 
     _export_pointcloud(best, pointcloud_path)
@@ -166,7 +181,8 @@ def _run_pycolmap_pipeline(
 
 
 def _export_pointcloud(
-    reconstruction, pointcloud_path: Path,
+    reconstruction: pycolmap.Reconstruction,
+    pointcloud_path: Path,
 ) -> None:
     """Export 3D points from reconstruction as PLY.
 
@@ -194,7 +210,8 @@ def _export_pointcloud(
 
 
 def _pointcloud_to_mesh(
-    pointcloud_path: Path, mesh_path: Path,
+    pointcloud_path: Path,
+    mesh_path: Path,
 ) -> None:
     """Convert point cloud to mesh via convex hull or ball-pivoting.
 
@@ -226,14 +243,9 @@ def _validate_photos_dir(photos_dir: Path) -> None:
     if not photos_dir.exists():
         raise FileNotFoundError(f"Photos directory not found: {photos_dir}")
     image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".tiff"}
-    photos = [
-        f for f in photos_dir.iterdir()
-        if f.suffix.lower() in image_exts
-    ]
+    photos = [f for f in photos_dir.iterdir() if f.suffix.lower() in image_exts]
     if len(photos) < 3:
-        raise FileNotFoundError(
-            f"Need at least 3 photos, found {len(photos)} in {photos_dir}"
-        )
+        raise FileNotFoundError(f"Need at least 3 photos, found {len(photos)} in {photos_dir}")
 
 
 def _generate_base_mjcf(mesh_path: Path, mjcf_path: Path) -> None:
@@ -266,7 +278,8 @@ def _generate_base_mjcf(mesh_path: Path, mjcf_path: Path) -> None:
 
 
 def _estimate_dimensions(
-    mesh_path: Path, pointcloud_path: Path,
+    mesh_path: Path,
+    pointcloud_path: Path,
 ) -> Dimensions:
     """Estimate room dimensions from mesh or point cloud bounding box.
 

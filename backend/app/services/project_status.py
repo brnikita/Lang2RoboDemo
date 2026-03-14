@@ -1,8 +1,11 @@
 """Project status persistence — CRUD for status.json per project."""
 
+from __future__ import annotations
+
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException
 
@@ -13,6 +16,11 @@ from backend.app.models.project import (
     ProjectDetail,
     ProjectStatus,
 )
+
+if TYPE_CHECKING:
+    from backend.app.models.recommendation import Recommendation
+    from backend.app.models.simulation import SimResult
+    from backend.app.models.space import Dimensions
 
 __all__ = [
     "get_project_dir",
@@ -43,7 +51,7 @@ def _status_path(project_id: str) -> Path:
 
 def _now() -> datetime:
     """Return current UTC timestamp."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def create_project_status(project_id: str, name: str = "") -> ProjectStatus:
@@ -131,9 +139,7 @@ def _collect_statuses(projects_root: Path) -> list[ProjectStatus]:
     statuses: list[ProjectStatus] = []
     for status_file in projects_root.glob("*/status.json"):
         try:
-            status = ProjectStatus.model_validate_json(
-                status_file.read_text(encoding="utf-8")
-            )
+            status = ProjectStatus.model_validate_json(status_file.read_text(encoding="utf-8"))
             statuses.append(status)
         except (json.JSONDecodeError, ValueError):
             continue
@@ -163,7 +169,7 @@ def load_project_detail(project_id: str) -> ProjectDetail:
     )
 
 
-def _load_dimensions(project_dir: Path):
+def _load_dimensions(project_dir: Path) -> Dimensions | None:
     """Load dimensions from reconstruction metadata if available."""
     from backend.app.models.space import Dimensions
 
@@ -177,7 +183,7 @@ def _load_dimensions(project_dir: Path):
     return Dimensions.model_validate(dims) if dims else None
 
 
-def _load_recommendation(project_dir: Path):
+def _load_recommendation(project_dir: Path) -> Recommendation | None:
     """Load recommendation.json if available."""
     from backend.app.models.recommendation import Recommendation
 
@@ -187,7 +193,7 @@ def _load_recommendation(project_dir: Path):
     return Recommendation.model_validate_json(path.read_text(encoding="utf-8"))
 
 
-def _load_sim_result(project_dir: Path):
+def _load_sim_result(project_dir: Path) -> SimResult | None:
     """Load latest simulation result if available."""
     from backend.app.models.simulation import SimResult
 

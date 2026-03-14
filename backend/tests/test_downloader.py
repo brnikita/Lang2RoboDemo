@@ -32,7 +32,7 @@ class TestPlaceholder:
             specs={"length_m": 1.0, "width_m": 0.2, "height_m": 0.85},
             mjcf_source=MjcfSource(),
         )
-        result = _create_placeholder(entry, tmp_path)
+        _ = _create_placeholder(entry, tmp_path)
         mjcf = tmp_path / "test_conveyor.xml"
         assert mjcf.exists()
         content = mjcf.read_text()

@@ -88,7 +88,8 @@ def _make_valid_recommendation_json() -> str:
             ),
         ],
         expected_metrics=ExpectedMetrics(
-            cycle_time_s=6.0, throughput_per_hour=600,
+            cycle_time_s=6.0,
+            throughput_per_hour=600,
         ),
         text_plan="Pick items from table, place on conveyor.",
     )
@@ -143,14 +144,18 @@ class TestFormatContext:
     def test_includes_scenario(self, sample_space_model) -> None:
         catalog = _make_catalog()
         ctx = format_recommendation_context(
-            sample_space_model, "Test scenario text", catalog,
+            sample_space_model,
+            "Test scenario text",
+            catalog,
         )
         assert "Test scenario text" in ctx
 
     def test_includes_catalog_ids(self, sample_space_model) -> None:
         catalog = _make_catalog()
         ctx = format_recommendation_context(
-            sample_space_model, "Test", catalog,
+            sample_space_model,
+            "Test",
+            catalog,
         )
         assert "franka_emika_panda" in ctx
         assert "conveyor_500mm" in ctx
@@ -158,7 +163,9 @@ class TestFormatContext:
     def test_includes_room_dimensions(self, sample_space_model) -> None:
         catalog = _make_catalog()
         ctx = format_recommendation_context(
-            sample_space_model, "Test", catalog,
+            sample_space_model,
+            "Test",
+            catalog,
         )
         assert "6.0" in ctx  # width_m
 

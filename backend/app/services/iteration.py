@@ -11,14 +11,16 @@ from backend.app.core.config import get_settings
 from backend.app.core.prompts import load_prompt
 from backend.app.models.equipment import EquipmentEntry
 from backend.app.models.iteration import (
+    EquipmentReplacement,
     IterationLog,
+    PositionChange,
     SceneCorrections,
 )
-from backend.app.models.recommendation import Recommendation
+from backend.app.models.recommendation import EquipmentPlacement, Recommendation
 from backend.app.models.simulation import SimMetrics, SimResult
-from backend.app.services.catalog import load_equipment_catalog, validate_equipment_id
+from backend.app.services.catalog import validate_equipment_id
 from backend.app.services.downloader import download_equipment_model
-from backend.app.services.scene import _equipment_half_size, _equipment_color, _format_pos
+from backend.app.services.scene import _equipment_color, _equipment_half_size, _format_pos
 from backend.app.services.simulator import run_simulation
 
 __all__ = [
@@ -69,19 +71,28 @@ async def run_iteration_loop(
         logger.info("Iteration %d: success_rate=%.2f", i + 1, result.metrics.success_rate)
 
         corrections = await iterate_once(
-            current_scene, result.metrics, history, catalog, client,
+            current_scene,
+            result.metrics,
+            history,
+            catalog,
+            client,
         )
 
         new_scene = _next_scene_path(current_scene)
         await apply_corrections(
-            current_scene, corrections, catalog, new_scene,
+            current_scene,
+            corrections,
+            catalog,
+            new_scene,
         )
 
-        history.append(IterationLog(
-            iteration=i + 1,
-            metrics=result.metrics,
-            corrections_applied=corrections,
-        ))
+        history.append(
+            IterationLog(
+                iteration=i + 1,
+                metrics=result.metrics,
+                corrections_applied=corrections,
+            )
+        )
 
         current_scene = new_scene
         result = await run_simulation(
@@ -122,7 +133,10 @@ async def iterate_once(
     """
     system_prompt = load_prompt("iteration")
     context = _format_iteration_context(
-        scene_path, metrics, history, catalog,
+        scene_path,
+        metrics,
+        history,
+        catalog,
     )
 
     last_error: Exception | None = None
@@ -137,7 +151,9 @@ async def iterate_once(
         except (ValueError, KeyError, json.JSONDecodeError) as exc:
             last_error = exc
             logger.warning(
-                "Iteration parse attempt %d failed: %s", attempt + 1, exc,
+                "Iteration parse attempt %d failed: %s",
+                attempt + 1,
+                exc,
             )
 
     raise ValueError(f"Failed to parse corrections: {last_error}")
@@ -199,10 +215,7 @@ def _is_converged(metrics: SimMetrics) -> bool:
     Returns:
         True if converged.
     """
-    return (
-        metrics.success_rate >= _SUCCESS_THRESHOLD
-        and metrics.collision_count == 0
-    )
+    return metrics.success_rate >= _SUCCESS_THRESHOLD and metrics.collision_count == 0
 
 
 def _next_scene_path(current: Path) -> Path:
@@ -215,10 +228,7 @@ def _next_scene_path(current: Path) -> Path:
         Next version path (e.g., v2.xml).
     """
     stem = current.stem
-    if stem.startswith("v") and stem[1:].isdigit():
-        version = int(stem[1:]) + 1
-    else:
-        version = 2
+    version = int(stem[1:]) + 1 if stem.startswith("v") and stem[1:].isdigit() else 2
     return current.parent / f"v{version}.xml"
 
 
@@ -284,7 +294,7 @@ def _parse_corrections(
     return corrections
 
 
-def _apply_position_change(worldbody: ET.Element, change) -> None:
+def _apply_position_change(worldbody: ET.Element, change: PositionChange) -> None:
     """Move a body to a new position in the MJCF tree.
 
     Args:
@@ -296,6 +306,7 @@ def _apply_position_change(worldbody: ET.Element, change) -> None:
             body.set("pos", _format_pos(change.new_position))
             if change.new_orientation_deg is not None:
                 import math
+
                 euler = f"0 0 {math.radians(change.new_orientation_deg):.4f}"
                 body.set("euler", euler)
             return
@@ -316,7 +327,7 @@ def _remove_body(worldbody: ET.Element, equipment_id: str) -> None:
 
 def _replace_body(
     worldbody: ET.Element,
-    replacement,
+    replacement: EquipmentReplacement,
     new_entry: EquipmentEntry,
 ) -> None:
     """Replace one equipment body with another.
@@ -332,23 +343,32 @@ def _replace_body(
             euler = body.get("euler", "0 0 0")
             worldbody.remove(body)
 
-            new_body = ET.SubElement(worldbody, "body", {
-                "name": replacement.new_equipment_id,
-                "pos": pos, "euler": euler,
-            })
+            new_body = ET.SubElement(
+                worldbody,
+                "body",
+                {
+                    "name": replacement.new_equipment_id,
+                    "pos": pos,
+                    "euler": euler,
+                },
+            )
             size = _equipment_half_size(new_entry)
-            ET.SubElement(new_body, "geom", {
-                "name": f"{replacement.new_equipment_id}_geom",
-                "type": "box",
-                "size": f"{size[0]:.3f} {size[1]:.3f} {size[2]:.3f}",
-                "rgba": _equipment_color(new_entry.type),
-            })
+            ET.SubElement(
+                new_body,
+                "geom",
+                {
+                    "name": f"{replacement.new_equipment_id}_geom",
+                    "type": "box",
+                    "size": f"{size[0]:.3f} {size[1]:.3f} {size[2]:.3f}",
+                    "rgba": _equipment_color(new_entry.type),
+                },
+            )
             return
 
 
 def _add_equipment_body(
     worldbody: ET.Element,
-    placement,
+    placement: EquipmentPlacement,
     entry: EquipmentEntry,
 ) -> None:
     """Add a new equipment body to the scene.
@@ -359,16 +379,25 @@ def _add_equipment_body(
         entry: Equipment catalog entry.
     """
     pos = _format_pos(placement.position)
-    body = ET.SubElement(worldbody, "body", {
-        "name": placement.equipment_id, "pos": pos,
-    })
+    body = ET.SubElement(
+        worldbody,
+        "body",
+        {
+            "name": placement.equipment_id,
+            "pos": pos,
+        },
+    )
     size = _equipment_half_size(entry)
-    ET.SubElement(body, "geom", {
-        "name": f"{placement.equipment_id}_geom",
-        "type": "box",
-        "size": f"{size[0]:.3f} {size[1]:.3f} {size[2]:.3f}",
-        "rgba": _equipment_color(entry.type),
-    })
+    ET.SubElement(
+        body,
+        "geom",
+        {
+            "name": f"{placement.equipment_id}_geom",
+            "type": "box",
+            "size": f"{size[0]:.3f} {size[1]:.3f} {size[2]:.3f}",
+            "rgba": _equipment_color(entry.type),
+        },
+    )
 
 
 def _extract_json(text: str) -> str:

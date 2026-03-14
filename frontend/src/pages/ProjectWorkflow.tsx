@@ -142,7 +142,7 @@ export function ProjectWorkflow(): React.JSX.Element {
     (_result: SimResult, _history: IterationLog[]) => {
       refresh();
     },
-    [],
+    [refresh],
   );
 
   if (loading) {
