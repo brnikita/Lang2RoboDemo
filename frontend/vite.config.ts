@@ -10,8 +10,9 @@ export default defineConfig({
     },
   },
   server: {
+    port: parseInt(process.env.FRONTEND_PORT ?? "5173"),
     proxy: {
-      "/api": "http://localhost:8000",
+      "/api": `http://${process.env.BACKEND_HOST ?? "127.0.0.1"}:${process.env.BACKEND_PORT ?? "8000"}`,
     },
   },
 });

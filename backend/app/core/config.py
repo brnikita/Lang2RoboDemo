@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     OPENROUTER_MODEL: str = "anthropic/claude-sonnet-4.6"
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 
+    BACKEND_HOST: str = "127.0.0.1"
+    BACKEND_PORT: int = 8000
+    FRONTEND_PORT: int = 5173
+
     DATA_DIR: Path = _ROOT_DIR / "data"
     MODELS_DIR: Path = _ROOT_DIR / "models"
     KNOWLEDGE_BASE_DIR: Path = _ROOT_DIR / "knowledge-base"
