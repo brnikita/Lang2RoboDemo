@@ -10,7 +10,7 @@ from backend.app.core.config import get_settings
 from backend.app.models.equipment import EquipmentEntry
 from backend.app.services.catalog import load_equipment_catalog
 
-__all__ = ["download_equipment_models", "download_equipment_model"]
+__all__ = ["download_equipment_models", "download_equipment_model", "find_mjcf_in_dir"]
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,29 @@ def _is_cached(cache_dir: Path) -> bool:
     """
     if not cache_dir.exists():
         return False
-    return any(cache_dir.iterdir())
+    return any(cache_dir.rglob("*.xml"))
+
+
+def find_mjcf_in_dir(model_dir: Path) -> Path | None:
+    """Find the main MJCF entry point in a model directory.
+
+    Args:
+        model_dir: Directory containing model files.
+
+    Returns:
+        Path to main MJCF file, or None if not found.
+    """
+    if model_dir is None or not model_dir.exists():
+        return None
+    dir_name = model_dir.name
+    direct = model_dir / f"{dir_name}.xml"
+    if direct.exists():
+        return direct
+    scene = model_dir / "scene.xml"
+    if scene.exists():
+        return scene
+    xmls = sorted(model_dir.glob("*.xml"))
+    return xmls[0] if xmls else None
 
 
 def _fetch_from_robot_descriptions(

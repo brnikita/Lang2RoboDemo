@@ -2,6 +2,7 @@
 
 import logging
 import math
+import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from backend.app.models.recommendation import (
     WorkObject,
 )
 from backend.app.models.space import Dimensions, SpaceModel
+from backend.app.services.downloader import find_mjcf_in_dir
 
 __all__ = ["generate_mjcf_scene", "validate_mjcf"]
 
@@ -275,14 +277,14 @@ def _add_existing_equipment(
 
 
 def _add_new_equipment(
-    _root: ET.Element,
+    root: ET.Element,
     worldbody: ET.Element,
     placements: list[EquipmentPlacement],
-    _model_dirs: dict[str, Path],
+    model_dirs: dict[str, Path],
     catalog: dict[str, EquipmentEntry],
-    _scene_dir: Path,
+    scene_dir: Path,
 ) -> None:
-    """Add new equipment from recommendation.
+    """Add new equipment from recommendation, dispatching by type.
 
     Args:
         root: Root mujoco element (for includes).
@@ -298,35 +300,244 @@ def _add_new_equipment(
         if not entry:
             continue
 
-        # Ensure unique body names for MuJoCo
         count = name_counts.get(placement.equipment_id, 0)
         name_counts[placement.equipment_id] = count + 1
         body_name = placement.equipment_id if count == 0 else f"{placement.equipment_id}_{count}"
 
+        if entry.type == "manipulator":
+            _add_manipulator_to_scene(
+                root,
+                worldbody,
+                placement,
+                body_name,
+                model_dirs,
+                scene_dir,
+            )
+        elif entry.type == "conveyor":
+            _add_conveyor_to_scene(root, worldbody, placement, body_name, entry)
+        elif entry.type == "camera":
+            _add_camera_body_to_scene(worldbody, placement, body_name, entry)
+        else:
+            _add_fixture_to_scene(worldbody, placement, body_name, entry)
+
+
+def _add_manipulator_to_scene(
+    _root: ET.Element,
+    worldbody: ET.Element,
+    placement: EquipmentPlacement,
+    body_name: str,
+    model_dirs: dict[str, Path],
+    scene_dir: Path,
+) -> None:
+    """Include real MJCF model for a manipulator.
+
+    Args:
+        _root: Root mujoco element (unused, reserved for future).
+        worldbody: Worldbody XML element.
+        placement: Equipment placement data.
+        body_name: Unique body name.
+        model_dirs: Model directory mapping.
+        scene_dir: Scene directory for relative paths.
+    """
+    model_dir = model_dirs.get(placement.equipment_id)
+    mjcf_file = find_mjcf_in_dir(model_dir) if model_dir else None
+
+    if mjcf_file:
+        try:
+            rel_path = os.path.relpath(mjcf_file, scene_dir).replace("\\", "/")
+        except ValueError:
+            rel_path = str(mjcf_file).replace("\\", "/")
+
         pos = _format_pos(placement.position)
         euler = f"0 0 {math.radians(placement.orientation_deg):.4f}"
-
         body = ET.SubElement(
             worldbody,
             "body",
-            {
-                "name": body_name,
-                "pos": pos,
-                "euler": euler,
-            },
+            {"name": body_name, "pos": pos, "euler": euler},
         )
+        ET.SubElement(body, "include", {"file": rel_path})
+    else:
+        _add_fallback_box(worldbody, placement, body_name)
 
-        size = _equipment_half_size(entry)
+
+def _add_conveyor_to_scene(
+    root: ET.Element,
+    worldbody: ET.Element,
+    placement: EquipmentPlacement,
+    body_name: str,
+    entry: EquipmentEntry,
+) -> None:
+    """Add parametric conveyor with belt surface, rollers, and frame.
+
+    Args:
+        root: Root mujoco element.
+        worldbody: Worldbody XML element.
+        placement: Equipment placement data.
+        body_name: Unique body name.
+        entry: Equipment catalog entry.
+    """
+    specs = entry.specs
+    length = float(specs.get("length_m", 0.5))
+    width = float(specs.get("width_m", 0.15))
+    height = float(specs.get("height_m", 0.85))
+
+    pos = _format_pos(placement.position)
+    euler = f"0 0 {math.radians(placement.orientation_deg):.4f}"
+    body = ET.SubElement(
+        worldbody,
+        "body",
+        {"name": body_name, "pos": pos, "euler": euler},
+    )
+
+    half_l = length / 2
+    half_w = width / 2
+
+    # Belt surface (high friction)
+    ET.SubElement(
+        body,
+        "geom",
+        {
+            "name": f"{body_name}_belt",
+            "type": "box",
+            "size": f"{half_l:.3f} {half_w:.3f} 0.005",
+            "pos": f"0 0 {height:.3f}",
+            "friction": "1 0.005 0.0001",
+            "rgba": "0.3 0.3 0.3 1",
+        },
+    )
+
+    # Support frame
+    ET.SubElement(
+        body,
+        "geom",
+        {
+            "name": f"{body_name}_frame",
+            "type": "box",
+            "size": f"{half_l:.3f} {half_w + 0.01:.3f} {height / 2:.3f}",
+            "pos": f"0 0 {height / 2:.3f}",
+            "rgba": "0.4 0.4 0.5 1",
+        },
+    )
+
+    # End rollers
+    for side, x_off in [("left", -half_l), ("right", half_l)]:
         ET.SubElement(
             body,
             "geom",
             {
-                "name": f"{body_name}_geom",
-                "type": "box",
-                "size": f"{size[0]:.3f} {size[1]:.3f} {size[2]:.3f}",
-                "rgba": _equipment_color(entry.type),
+                "name": f"{body_name}_roller_{side}",
+                "type": "cylinder",
+                "size": f"0.02 {half_w:.3f}",
+                "pos": f"{x_off:.3f} 0 {height:.3f}",
+                "euler": "1.5708 0 0",
+                "rgba": "0.5 0.5 0.5 1",
             },
         )
+
+    # Ensure actuator section exists (for Phase 4 belt velocity)
+    actuator = root.find("actuator")
+    if actuator is None:
+        ET.SubElement(root, "actuator")
+
+
+def _add_camera_body_to_scene(
+    worldbody: ET.Element,
+    placement: EquipmentPlacement,
+    body_name: str,
+    entry: EquipmentEntry,
+) -> None:
+    """Add camera housing body.
+
+    Args:
+        worldbody: Worldbody XML element.
+        placement: Equipment placement data.
+        body_name: Unique body name.
+        entry: Equipment catalog entry.
+    """
+    height = float(entry.specs.get("mounting_height_m", 1.5))
+    body = ET.SubElement(
+        worldbody,
+        "body",
+        {
+            "name": body_name,
+            "pos": f"{placement.position[0]:.3f} {placement.position[1]:.3f} {height:.3f}",
+        },
+    )
+    ET.SubElement(
+        body,
+        "geom",
+        {
+            "name": f"{body_name}_housing",
+            "type": "box",
+            "size": "0.03 0.03 0.02",
+            "rgba": "0.15 0.15 0.15 1",
+        },
+    )
+
+
+def _add_fixture_to_scene(
+    worldbody: ET.Element,
+    placement: EquipmentPlacement,
+    body_name: str,
+    entry: EquipmentEntry,
+) -> None:
+    """Add fixture as static box geom.
+
+    Args:
+        worldbody: Worldbody XML element.
+        placement: Equipment placement data.
+        body_name: Unique body name.
+        entry: Equipment catalog entry.
+    """
+    pos = _format_pos(placement.position)
+    euler = f"0 0 {math.radians(placement.orientation_deg):.4f}"
+    body = ET.SubElement(
+        worldbody,
+        "body",
+        {"name": body_name, "pos": pos, "euler": euler},
+    )
+    size = _equipment_half_size(entry)
+    ET.SubElement(
+        body,
+        "geom",
+        {
+            "name": f"{body_name}_geom",
+            "type": "box",
+            "size": f"{size[0]:.3f} {size[1]:.3f} {size[2]:.3f}",
+            "rgba": _equipment_color(entry.type),
+        },
+    )
+
+
+def _add_fallback_box(
+    worldbody: ET.Element,
+    placement: EquipmentPlacement,
+    body_name: str,
+) -> None:
+    """Add a generic fallback box when no model is available.
+
+    Args:
+        worldbody: Worldbody XML element.
+        placement: Equipment placement data.
+        body_name: Unique body name.
+    """
+    pos = _format_pos(placement.position)
+    euler = f"0 0 {math.radians(placement.orientation_deg):.4f}"
+    body = ET.SubElement(
+        worldbody,
+        "body",
+        {"name": body_name, "pos": pos, "euler": euler},
+    )
+    ET.SubElement(
+        body,
+        "geom",
+        {
+            "name": f"{body_name}_geom",
+            "type": "box",
+            "size": "0.15 0.15 0.15",
+            "rgba": "0.8 0.2 0.2 1",
+        },
+    )
 
 
 def _add_work_objects(
