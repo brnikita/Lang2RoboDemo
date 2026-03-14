@@ -80,7 +80,7 @@ export function ProjectWorkflow(): React.JSX.Element {
     step: string;
   }>();
   const navigate = useNavigate();
-  const currentStep = (step ?? "calibrate") as Step;
+  const currentStep = (step ?? "upload") as Step;
 
   const {
     status,
