@@ -26,7 +26,7 @@ class IterateRequest(BaseModel):
         max_iterations: Maximum number of improvement iterations.
     """
 
-    max_iterations: int = Field(default=5, ge=1, le=10)
+    max_iterations: int = Field(default=5, ge=1, le=50)
 
 
 class IterateResponse(BaseModel):
