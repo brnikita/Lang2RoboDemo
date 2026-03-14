@@ -21,7 +21,9 @@ from backend.app.models.space import Dimensions, ReferenceCalibration, SceneReco
 __all__ = [
     "reconstruct_scene",
     "calibrate_scale",
+    "rescale_pointcloud",
     "check_reconstruction_deps",
+    "transform_colmap_to_threejs",
 ]
 
 logger = logging.getLogger(__name__)
@@ -89,6 +91,20 @@ async def reconstruct_scene(
     )
 
 
+def rescale_pointcloud(ply_path: Path, scale_factor: float) -> None:
+    """Rescale point cloud vertices by a factor.
+
+    Args:
+        ply_path: Path to PLY file (modified in-place).
+        scale_factor: Multiplier for all vertex coordinates.
+    """
+    import trimesh
+
+    cloud = trimesh.load(str(ply_path))
+    cloud.vertices *= scale_factor
+    cloud.export(str(ply_path))
+
+
 def calibrate_scale(
     reconstruction: SceneReconstruction,
     calibration: ReferenceCalibration,
@@ -110,6 +126,8 @@ def calibrate_scale(
     _apply_scale_to_mjcf(reconstruction.mjcf_path, scale_factor)
     if reconstruction.mesh_path.stat().st_size > 0:
         _apply_scale_to_mesh(reconstruction.mesh_path, scale_factor)
+    if reconstruction.pointcloud_path.stat().st_size > 0:
+        rescale_pointcloud(reconstruction.pointcloud_path, scale_factor)
 
     return SceneReconstruction(
         mesh_path=reconstruction.mesh_path,
@@ -144,18 +162,18 @@ def _run_pycolmap_pipeline(
 
     logger.info("Extracting features from %s", photos_dir)
     extract_opts = pycolmap.FeatureExtractionOptions()
-    extract_opts.sift.max_num_features = 8192
+    extract_opts.sift.max_num_features = 32768
     pycolmap.extract_features(db_str, photos_str, extraction_options=extract_opts)
 
     logger.info("Matching features exhaustively")
     match_opts = pycolmap.FeatureMatchingOptions()
-    match_opts.sift.max_ratio = 0.9
-    match_opts.sift.max_distance = 0.9
+    match_opts.sift.max_ratio = 0.8
+    match_opts.sift.max_distance = 0.7
     pycolmap.match_exhaustive(db_str, matching_options=match_opts)
 
     logger.info("Running incremental SfM")
     mapper_opts = pycolmap.IncrementalPipelineOptions()
-    mapper_opts.min_num_matches = 10
+    mapper_opts.min_num_matches = 15
     reconstructions = pycolmap.incremental_mapping(
         db_str,
         photos_str,
@@ -180,6 +198,25 @@ def _run_pycolmap_pipeline(
     _pointcloud_to_mesh(pointcloud_path, mesh_path)
 
 
+def transform_colmap_to_threejs(points: np.ndarray) -> np.ndarray:
+    """Transform COLMAP coordinates to Three.js convention.
+
+    COLMAP: X-right, Y-down, Z-forward.
+    Three.js: X-right, Y-up, Z-back.
+
+    Args:
+        points: Nx3 array in COLMAP convention.
+
+    Returns:
+        Nx3 array in Three.js convention.
+    """
+    transformed = np.empty_like(points)
+    transformed[:, 0] = points[:, 0]
+    transformed[:, 1] = -points[:, 1]
+    transformed[:, 2] = -points[:, 2]
+    return transformed
+
+
 def _export_pointcloud(
     reconstruction: pycolmap.Reconstruction,
     pointcloud_path: Path,
@@ -192,21 +229,39 @@ def _export_pointcloud(
     """
     import trimesh
 
+    raw_points, colors = _collect_points(reconstruction)
+    vertices = transform_colmap_to_threejs(np.array(raw_points))
+
+    cloud = trimesh.PointCloud(
+        vertices=vertices,
+        colors=np.array(colors, dtype=np.uint8),
+    )
+    cloud.export(str(pointcloud_path))
+    logger.info("Exported %d points to %s", len(raw_points), pointcloud_path)
+
+
+def _collect_points(
+    reconstruction: pycolmap.Reconstruction,
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    """Extract raw 3D points and colors from reconstruction.
+
+    Args:
+        reconstruction: pycolmap Reconstruction object.
+
+    Returns:
+        Tuple of (points list, colors list).
+
+    Raises:
+        RuntimeError: If no 3D points in reconstruction.
+    """
     points = []
     colors = []
     for point3d in reconstruction.points3D.values():
         points.append(point3d.xyz)
         colors.append(point3d.color)
-
     if not points:
         raise RuntimeError("No 3D points in reconstruction")
-
-    cloud = trimesh.PointCloud(
-        vertices=np.array(points),
-        colors=np.array(colors, dtype=np.uint8),
-    )
-    cloud.export(str(pointcloud_path))
-    logger.info("Exported %d points to %s", len(points), pointcloud_path)
+    return points, colors
 
 
 def _pointcloud_to_mesh(
