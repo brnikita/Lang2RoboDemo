@@ -1,202 +1,212 @@
-# Plan: Presentation-Quality Simulation
+# Plan: Presentation-Quality Simulation Engine
 
-## Problem
+## Context
 
-The MuJoCo viewer shows only colored boxes instead of recognizable equipment. There are no articulated robot arms, no conveyor belt physics, no actual pick-and-place movements. The current simulation is a structural placeholder — it validates reachability via distance checks but doesn't visually demonstrate the automation process.
+Lang2Robo — универсальный генератор автоматизации. Пользователь описывает **любой** бизнес-процесс текстом, Claude подбирает оборудование из каталога, строит сцену, симулирует, оптимизирует. Это НЕ конкретный сценарий — это платформа.
 
-For client presentations, we need:
-1. Real robot arm models (articulated, with meshes) that visibly move
-2. Conveyor belts that physically transport objects
-3. Pick-and-place actions the viewer can watch happening
-4. The iteration loop ("Run Optimization") producing visible improvements
+Примеры из SPEC:
+- 3D print farm (робот + конвейер + камера)
+- Пункт выдачи (конвейер + камера, БЕЗ робота)
+- Ремонт электроники (робот + камера, БЕЗ конвейера)
+- Dark kitchen (робот + конвейер + камера)
 
-## Current State Analysis
+**Текущая проблема**: Все оборудование в MuJoCo отображается как цветные кубики. Нет артикулированных роботов, конвейеры не двигают объекты, IK-контроллер только проверяет дистанцию. Клиенту нечего показать — он видит стопку кубиков вместо работающего автоматизированного процесса.
 
-| Component | Current | Target |
+**Цель**: Сделать симуляцию визуально презентабельной для ЛЮБОГО сценария, который генерирует Claude.
+
+---
+
+## Gap Analysis: Current vs SPEC
+
+### Module 3 — Scene Assembly
+
+| SPEC | Current | Gap |
 |---|---|---|
-| **Robot arms** | Box geom (`0.15 × 0.15 × reach/2`) | Full articulated MJCF from MuJoCo Menagerie (xarm7, franka, etc.) with joints + actuators |
-| **Conveyors** | Static box geom | Belt surface with velocity actuator — objects slide along |
-| **Fixtures** | Static box geom | Box geom (acceptable for tables/shelves) |
-| **Work objects** | Box geom + freejoint | Same (acceptable) — small colored boxes represent parts |
-| **Cameras** | Geometric FOV check | Same + optional rendered frame |
-| **IK controller** | Distance check only | Jacobian-based IK driving joint actuators → arm visibly reaches target |
-| **Conveyor physics** | `mj_step()` only | Velocity field or slide joint moving belt → objects ride along |
-| **Pick action** | Reach check → success/fail | IK to target → weld constraint (attach object to gripper) → lift |
-| **Place action** | Reach check → success/fail | IK to drop point → remove weld → object falls via gravity |
-| **Iteration** | XML position edits | Same, but now visible because robots move and objects transport |
+| Download MJCF from Menagerie → include в сцену | Модели скачиваются, но **не включаются** — вместо них box geom | **Критический**: нужно `<include>` реальных MJCF |
+| `add_equipment_to_scene(mjcf, model_path, pos, orientation)` | Генерирует `<body><geom type="box"/></body>` | Не использует `model_path` |
+| Work objects — dynamic bodies | `<freejoint>` + box geom | ОК, но нет grasp/attachment |
+| Existing equipment — static bodies | Box geom, brown color | Приемлемо для MVP |
+| DISCOVERSE mesh как background | Не интегрирован | Отдельная задача (Module 1) |
 
-## What We Already Have (but don't use)
+### Module 4 — Simulation Executors
 
-1. **robot_descriptions 1.23.0** — 57 MuJoCo-ready models including xarm7, franka_emika_panda, ur5e, aloha, kinova_gen3, sawyer. Each has full MJCF with joints, actuators, meshes, and collision geoms.
+| SPEC: Equipment Type | SPEC: Behavior | Current | Gap |
+|---|---|---|---|
+| **manipulator** (pick/place/move) | `compute_ik_trajectory()` → `execute_trajectory()` | Distance check → success/fail | Нет IK, нет движения суставов, нет grasp |
+| **conveyor** (transport) | `find_joint()` → `set_conveyor_speed()` → `sim_until()` | `mj_step()` without any force | Объекты не двигаются |
+| **camera** (inspect) | `render_camera()` → `is_in_camera_fov()` | Geometric FOV check only | Рендеринг не реализован |
+| **wait** | Physics stepping | `mj_step()` | ОК |
+| **learned policy** (MVP v2) | `policy.predict(obs)` → `apply_action()` | Не реализовано | Фаза 2 |
 
-2. **Downloader infrastructure** (`downloader.py`) — already resolves `menagerie_id` → `robot_descriptions` MJCF paths. Tested: `xarm7_mj_description.MJCF_PATH` works.
+### Module 5 — Iteration
 
-3. **Scene builder** (`scene.py`) — has `_inline_include()`, `_has_mjcf()`, `_find_mjcf()` helpers. The infrastructure to include real models exists but is bypassed in favor of box geoms.
-
-4. **MuJoCo 3.6.0** — supports `mj_jac()` (Jacobian), `mj_step()`, contact dynamics, weld equality constraints, velocity actuators — everything needed.
-
-## Architecture: 4 Features
-
-### Feature 1: Include Real Robot MJCF Models in Scenes
-
-**Problem**: `scene.py` generates `<body><geom type="box"/></body>` for manipulators instead of including the actual MJCF.
-
-**Solution**: For equipment with type `"manipulator"`, include the downloaded MJCF model (which has joints, actuators, meshes) instead of a box geom.
-
-**Approach**:
-- `generate_mjcf_scene()` already receives `model_dirs: dict[str, Path]`
-- For manipulators: use `<include file="..."/>` or inline the model's `<body>` tree into the scene at the correct position
-- MuJoCo Menagerie models are self-contained MJCF with `<default>`, `<asset>`, `<worldbody>`, `<actuator>` sections
-- Strategy: use MuJoCo's `<include>` directive with `<body>` wrapping for positioning, OR parse the model XML and transplant its body/actuator/asset elements into the scene
-
-**Key challenge**: Menagerie models are standalone scenes. To embed them, we need to:
-1. Copy model assets (meshes, textures) to the scene directory
-2. Merge `<asset>` definitions (prefix names to avoid collisions)
-3. Wrap the robot `<body>` tree inside a positioning `<body>` with the placement `pos`/`euler`
-4. Merge `<actuator>` definitions
-
-**Alternative (simpler)**: Use MuJoCo's `<attach>` or `<include>` with a relative file path. MuJoCo resolves mesh paths relative to the included file. This avoids asset merging entirely:
-```xml
-<body name="xarm7_base" pos="0.8 0.8 0.85">
-  <include file="../../models/ufactory_xarm7/xarm7.xml"/>
-</body>
-```
-
-**Files to modify**:
-- `backend/app/services/scene.py` — change manipulator generation to include real MJCF
-- `backend/app/services/downloader.py` — ensure models are actually downloaded (not empty dirs)
-
-**Checks**:
-- `pytest backend/tests/test_scene.py -x`
-- Manual: open generated scene in MuJoCo viewer → see articulated arm with meshes
-
-**Commit**: `feat: include real robot MJCF models in generated scenes`
+| SPEC | Current | Gap |
+|---|---|---|
+| Claude корректирует позиции → re-simulation | XML edits → re-simulation | Работает, но re-simulation не показывает улучшений визуально потому что робот не двигается |
+| Equipment replacement → download new model | Скачивание работает | Новая модель тоже становится кубиком |
 
 ---
 
-### Feature 2: Jacobian-Based IK Controller for Manipulators
+## Architecture: Features по слоям
 
-**Problem**: `simulator.py` only checks `distance > reach * 1.2` and reports success/fail. No joints move.
+Разделяю по слоям системы, а не по конкретным механикам. Каждая фича — универсальная для всех сценариев.
 
-**Solution**: Implement a resolved-rate IK controller using MuJoCo's `mj_jac()` and `mj_step()`.
+### Feature 1: Real Equipment Models in Scenes (Module 3)
 
-**Approach**:
-```python
-def _ik_step(model, data, site_name, target_pos, step_size=0.05):
-    """One IK iteration: compute Jacobian, apply joint velocity, step."""
-    site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, site_name)
-    jacp = np.zeros((3, model.nv))
-    mujoco.mj_jacSite(model, data, jacp, None, site_id)
+**Что**: При сборке сцены — включать реальные MJCF-модели оборудования вместо box geoms.
 
-    error = target_pos - data.site_xpos[site_id]
-    dq = step_size * jacp.T @ error  # Jacobian transpose method
-    data.qvel[:len(dq)] = dq
-    mujoco.mj_step(model, data)
-```
+**Покрывает**:
+- Манипуляторы (xarm7, franka, ur5e, aloha, kinova, sawyer, widow_x, so_arm100) — полные mesh + joints + actuators из MuJoCo Menagerie
+- Конвейеры — параметрический MJCF с slide joint + actuator (нет в Menagerie, генерируем)
+- Камеры — `<camera>` element (уже есть) + визуальный корпус body
+- Fixtures — box geoms (приемлемо, столы/полки не требуют mesh)
 
-**Pick/place with weld constraint**:
-- **Pick**: IK to object position → create `mj_equality` weld between gripper site and object → IK to lift position
-- **Place**: IK to drop position → remove weld → object falls via gravity
-- MuJoCo supports runtime weld constraints via `model.eq_active`
+**Как**:
+- Для `type == "manipulator"`: Use MuJoCo `<include file="..."/>` с relative path к скачанной модели. Menagerie MJCF самодостаточны — MuJoCo резолвит mesh paths relative to included file.
+- Для `type == "conveyor"`: Генерировать параметрический MJCF — body с belt surface geom + slide joint + velocity actuator. Размеры из каталога (length_m, width_m).
+- Для `type == "camera"`: Оставить `<camera>` element + добавить small box geom для визуализации корпуса.
+- Для `type == "fixture"`: Оставить box geom (текущий подход).
 
-**Files to modify**:
-- `backend/app/services/simulator.py` — replace `_scripted_manipulation()` with IK controller
-- Need to define `<site>` on the robot's end-effector in the included MJCF (or use existing sites from Menagerie models)
+**Файлы**:
+- `backend/app/services/scene.py` — основные изменения
+- `backend/app/services/downloader.py` — убедиться что модели реально скачиваются
 
-**Checks**:
-- `pytest backend/tests/test_simulator.py -x`
-- Manual: run simulation → MuJoCo viewer shows arm reaching, grasping, lifting, placing
-
-**Commit**: `feat: Jacobian-based IK controller for manipulator pick/place`
+**Commit**: `feat: include real MJCF models for all equipment types`
 
 ---
 
-### Feature 3: Conveyor Belt Physics
+### Feature 2: Universal Action Executors (Module 4)
 
-**Problem**: Conveyor is a static box. Objects don't move on it.
+**Что**: Реализовать настоящие executors для каждого `action` type из workflow.
 
-**Solution**: Model conveyor as a surface with velocity actuator.
+**Покрывает ВСЕ сценарии**, т.к. workflow всегда состоит из комбинации:
 
-**Approach** (two options):
+#### 2a: Manipulator actions (pick / place / move)
 
-**Option A — Velocity field via contact friction**: Use MuJoCo's `condim=4` contact model with `solref` parameters to simulate a moving belt surface. Apply tangential velocity by setting the belt body's velocity directly.
+Для **любого** манипулятора из каталога (xarm7, franka, ur5e, и т.д.):
 
-**Option B — Slide joint actuator (simpler)**: Model the conveyor belt as a body with a `<joint type="slide" axis="1 0 0"/>` and a velocity actuator. Place objects on top; friction carries them along. This is the standard MuJoCo conveyor approach.
+- **IK controller**: Jacobian transpose method через `mj_jacSite()`. Универсальный — работает с любым количеством joints/DOF. End-effector определяется через `<site>` на gripper (все Menagerie модели имеют end-effector sites).
+- **Grasp**: MuJoCo weld equality constraint — attach object body к gripper site. Runtime on/off через `model.eq_active`.
+- **pick** = IK to target → activate weld → IK to lift height
+- **place** = IK to drop position → deactivate weld → object falls via gravity
+- **move** = IK to target (with or without grasped object)
 
-**Recommended: Option B**
-```xml
-<body name="conveyor_500mm" pos="0.6 0.8 0.85">
-  <joint name="conveyor_belt" type="slide" axis="1 0 0" range="-0.25 0.25"/>
-  <geom type="box" size="0.25 0.075 0.01" friction="1 0.005 0.0001"/>
-</body>
-<actuator>
-  <velocity name="belt_speed" joint="conveyor_belt" kv="100"/>
-</actuator>
-```
+#### 2b: Conveyor actions (transport)
 
-Actually, the simplest approach: keep the belt static, but apply a **force field** to objects on the belt surface during `_sim_conveyor()` by detecting contact pairs with the belt geom and applying `xfrc_applied` to the contacting objects in the belt's axis direction.
+Для **любого** конвейера из каталога (500mm, 1000mm, 2000mm):
 
-**Files to modify**:
-- `backend/app/services/scene.py` — generate conveyor MJCF with proper contact surface
-- `backend/app/services/simulator.py` — `_sim_conveyor()` applies tangential forces to objects in contact with belt
+- Belt velocity через actuator control: `data.ctrl[actuator_id] = speed`
+- Объекты перемещаются за счёт friction с belt surface
+- Duration определяет как долго belt работает
 
-**Checks**:
-- Manual: open scene in viewer → place object on belt → it slides along
+#### 2c: Camera actions (inspect)
 
-**Commit**: `feat: conveyor belt physics with object transport`
+Для **любой** камеры (overhead, microscope, barcode):
+
+- FOV check (текущий, работает)
+- Optional: `mujoco.Renderer` для actual frame capture → сохранение image
+
+#### 2d: Wait action
+
+- Physics stepping (текущий, работает)
+
+**Файлы**:
+- `backend/app/services/simulator.py` — основные изменения
+- Новый модуль `backend/app/services/controllers.py` — IK controller, grasp controller (переиспользуемые для любого манипулятора)
+
+**Commit**: `feat: universal action executors for all equipment types`
 
 ---
 
-### Feature 4: Visual Simulation Runner (Viewer Integration)
+### Feature 3: Visual Simulation Mode (Module 4)
 
-**Problem**: The MuJoCo viewer (`POST /{id}/view`) opens a scene but doesn't run the workflow. It's just a static viewer.
+**Что**: "Launch Viewer" запускает MuJoCo viewer и проигрывает **весь workflow** визуально — робот двигается, конвейер крутится, объекты перемещаются.
 
-**Solution**: Create a visual simulation mode that runs the workflow step-by-step in the MuJoCo viewer, so the user can watch the robot pick, place, and the conveyor transport in real time.
+**Покрывает**: Все сценарии. Клиент нажимает кнопку — видит полный цикл автоматизации.
 
-**Approach**:
-- New function `run_visual_simulation()` that opens `mujoco.viewer.launch_passive()` and runs the workflow loop inside it
-- Each `_execute_step()` call drives the physics while the viewer renders at 60fps
-- The viewer stays open and shows the entire workflow cycle
+**Как**:
+- `mujoco.viewer.launch_passive()` — non-blocking viewer
+- Loop: для каждого workflow step → execute controller → viewer renders
+- Viewer sync через `viewer.sync()` на каждом physics step
 
-**Files to modify**:
-- `backend/app/services/simulator.py` — add `run_visual_simulation()` mode
-- `backend/app/api/simulate.py` — `POST /{id}/view` calls the visual runner
+**Файлы**:
+- `backend/app/services/simulator.py` — добавить `run_visual_simulation()`
+- `backend/app/api/simulate.py` — `POST /{id}/view` вызывает visual runner
 
-**Checks**:
-- Manual: click "Launch Viewer" → watch the full automation cycle play out
+**Commit**: `feat: visual simulation runner with real-time MuJoCo viewer`
 
-**Commit**: `feat: visual simulation runner with real-time viewer`
+---
+
+### Feature 4: Iteration Visibility (Module 5)
+
+**Что**: После "Run Optimization" — итеративный loop уже работает (Claude корректирует → re-sim). Нужно чтобы каждая итерация **визуально отличалась** — робот перемещен, workflow изменен, метрики улучшились.
+
+**Покрывает**: Все сценарии. Оптимизация универсальна:
+- Позиции оборудования (Claude двигает робот ближе к цели)
+- Замена оборудования (reach не хватает → Claude меняет робот на другой из каталога)
+- Изменение workflow (убрать лишний step, добавить промежуточную точку)
+
+**Что нужно**:
+- С Feature 1-3 итерации уже будут визуально значимыми (робот реально двигается → видно что изменилось)
+- Добавить: при замене оборудования → скачать новую модель → пересобрать сцену с реальным MJCF
+- Добавить: видео-запись каждой итерации для сравнения (optional: `mujoco.Renderer` → frame → mp4)
+
+**Файлы**:
+- `backend/app/services/iteration.py` — при `replace_equipment` пересобирать сцену с новыми моделями
+- Опционально: `backend/app/services/recorder.py` — video recording
+
+**Commit**: `feat: iteration loop with real model replacement and visual diff`
 
 ---
 
 ## Implementation Order
 
 ```
-Feature 1: Real robot models in scenes
+Feature 1: Real models in scenes         ← Prerequisite for everything
     ↓
-Feature 2: IK controller (depends on joints/actuators from Feature 1)
+Feature 2: Universal action executors     ← Makes simulation actually work
     ↓
-Feature 3: Conveyor belt physics (independent, can parallel with 2)
+Feature 3: Visual simulation mode         ← Client-facing demo
     ↓
-Feature 4: Visual simulation runner (needs 2+3 working first)
+Feature 4: Iteration visibility           ← Optimization demo
 ```
 
-## Risk Assessment
+Каждая фича — отдельный коммит с тестами. После Feature 3 уже можно демонстрировать клиенту.
 
-| Risk | Mitigation |
-|---|---|
-| Menagerie MJCF includes conflict with scene XML | Use MuJoCo `<include>` with relative paths; test each robot model independently |
-| IK divergence for unreachable targets | Keep distance pre-check; cap IK iterations; fallback to "unreachable" result |
-| Conveyor force too strong/weak | Tune force magnitude; use MuJoCo's built-in friction model |
-| Large mesh files slow down viewer | Menagerie models are already optimized for MuJoCo; typical scene < 10MB |
-| Robot model asset path resolution on Windows | Use forward slashes in MJCF; test on Windows specifically |
+---
 
-## Expected Result
+## Available Resources
 
-After all 4 features:
-1. **MuJoCo viewer shows**: Room with articulated robot arm (real mesh), conveyor belt, work table, camera, work objects
-2. **"Run Simulation"** computes real IK trajectories, objects get picked and placed, conveyor transports parts
-3. **"Run Optimization"** iterates: Claude adjusts positions → re-simulation shows improved robot movements
-4. **Client demo**: Upload room photos → get automation plan → watch robot work in 3D → optimize → present metrics
+### Robot Models (robot_descriptions 1.23.0)
+57 MuJoCo-ready моделей. Все из каталога имеют MJCF:
+- `xarm7_mj_description` → `ufactory_xarm7/xarm7.xml`
+- `panda_mj_description` → `franka_emika_panda/panda.xml`
+- `ur5e_mj_description` → `universal_robots_ur5e/ur5e.xml`
+- `aloha_mj_description` → `aloha/scene.xml`
+- `kinova_gen3_mj_description` → `kinova_gen3/gen3.xml`
 
-This matches the DISCOVERSE-level visual quality shown in the SPEC, except using MuJoCo Menagerie models directly instead of photorealistic reconstruction (which requires DISCOVERSE, not yet integrated).
+### MuJoCo 3.6.0 Capabilities
+- `mj_jacSite()` — Jacobian для IK (любое количество DOF)
+- `mj_step()` — physics at 500Hz
+- `eq_active` — runtime weld constraints для grasp
+- `data.ctrl[]` — actuator control для conveyor velocity
+- `mujoco.viewer.launch_passive()` — non-blocking viewer
+- `mujoco.Renderer` — offscreen rendering для camera/video
+
+### What's NOT Available (and not needed for MVP)
+- DISCOVERSE — room reconstruction (Module 1, separate task)
+- LeRobot + SmolVLA — policy training (Module 6, MVP v2)
+
+---
+
+## Expected Demo Flow (after implementation)
+
+1. Клиент загружает фото → получает 3D point cloud
+2. Описывает сценарий текстом (любой бизнес-процесс)
+3. Claude генерирует план — список оборудования из каталога
+4. "Confirm & Build Scene" → скачиваются реальные MJCF модели
+5. **MuJoCo viewer показывает**: articulated robot arm (mesh), conveyor belt, work objects, camera
+6. **"Run Simulation"** → робот двигается к цели, захватывает объект, ставит на конвейер, конвейер везёт объект, камера проверяет
+7. Метрики: cycle time, success rate, collisions
+8. **"Run Optimization"** → Claude корректирует → робот перемещён → re-simulation с улучшенными метриками
+9. Итог: финальная сцена + метрики + опционально видео
