@@ -1,6 +1,7 @@
 """IK engine, grasp manager, and end-effector resolution for MuJoCo scenes."""
 
 import logging
+from collections.abc import Callable
 
 import mujoco
 import numpy as np
@@ -62,6 +63,7 @@ class IKEngine:
         target_pos: np.ndarray,
         max_steps: int = 500,
         tolerance: float = 0.01,
+        on_step: Callable[[], None] | None = None,
     ) -> bool:
         """Drive end-effector to target position via Jacobian transpose IK.
 
@@ -69,6 +71,7 @@ class IKEngine:
             target_pos: Desired (x, y, z) position.
             max_steps: Maximum IK iterations.
             tolerance: Position error threshold in meters.
+            on_step: Optional callback invoked after each physics step.
 
         Returns:
             True if target was reached within tolerance.
@@ -76,6 +79,8 @@ class IKEngine:
         target = np.asarray(target_pos, dtype=np.float64)
         for _ in range(max_steps):
             error_norm = self._ik_step(target)
+            if on_step is not None:
+                on_step()
             if error_norm < tolerance:
                 return True
         return False

@@ -12,7 +12,7 @@ from backend.app.services.catalog import load_equipment_catalog
 from backend.app.services.downloader import download_equipment_models
 from backend.app.services.project_status import advance_phase, get_project_dir
 from backend.app.services.scene import generate_mjcf_scene, validate_mjcf
-from backend.app.services.simulator import run_simulation
+from backend.app.services.simulator import run_simulation, run_visual_simulation
 
 __all__ = ["router"]
 
@@ -78,39 +78,58 @@ async def build_scene(project_id: str) -> BuildSceneResponse:
 
 @router.post("/{project_id}/view")
 async def launch_viewer(project_id: str) -> dict:
-    """Launch MuJoCo interactive viewer for the latest scene.
+    """Launch MuJoCo interactive viewer with workflow playback.
+
+    Opens the viewer in a background thread and runs the full
+    workflow simulation with real-time visualization.
 
     Args:
         project_id: Project identifier.
 
     Returns:
-        Status message.
+        Status message with scene path.
     """
+    recommendation = _load_recommendation(project_id)
+    catalog = load_equipment_catalog()
     scene_path = _find_latest_scene(project_id)
 
     import threading
 
     thread = threading.Thread(
-        target=_open_mujoco_viewer,
-        args=(scene_path,),
+        target=_run_visual_in_thread,
+        args=(scene_path, recommendation, catalog),
         daemon=True,
     )
     thread.start()
     return {"status": "viewer_launched", "scene": str(scene_path)}
 
 
-def _open_mujoco_viewer(scene_path: Path) -> None:
-    """Open MuJoCo viewer in a separate thread.
+def _run_visual_in_thread(
+    scene_path: Path,
+    recommendation: "Recommendation",
+    catalog: dict,
+) -> None:
+    """Run visual simulation in a dedicated thread with its own event loop.
 
     Args:
-        scene_path: Path to MJCF scene.
+        scene_path: Path to MJCF scene file.
+        recommendation: Project recommendation with workflow.
+        catalog: Equipment catalog keyed by ID.
     """
-    import mujoco
-    import mujoco.viewer
+    import asyncio
 
-    model = mujoco.MjModel.from_xml_path(str(scene_path))
-    data = mujoco.MjData(model)
-    mujoco.viewer.launch(model, data)
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(
+            run_visual_simulation(
+                scene_path,
+                recommendation.workflow_steps,
+                catalog,
+                recommendation.target_positions,
+            ),
+        )
+    finally:
+        loop.close()
 
 
 def _load_space_model(project_id: str) -> SpaceModel:

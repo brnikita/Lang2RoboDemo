@@ -1,7 +1,12 @@
 """MuJoCo simulation runner — executes workflow steps in physics sim."""
 
+from __future__ import annotations
+
 import logging
+import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol
 
 import mujoco
 import numpy as np
@@ -11,9 +16,17 @@ from backend.app.models.recommendation import WorkflowStep
 from backend.app.models.simulation import SimMetrics, SimResult, StepResult
 from backend.app.services.controllers import GraspManager, IKEngine, find_ee_site
 
-__all__ = ["run_simulation", "compute_metrics"]
+__all__ = ["run_simulation", "run_visual_simulation", "compute_metrics"]
 
 logger = logging.getLogger(__name__)
+
+
+class _ViewerHandle(Protocol):
+    """Structural type for MuJoCo passive viewer handle."""
+
+    def sync(self) -> None:
+        """Synchronize viewer state with simulation data."""
+        ...
 
 
 async def run_simulation(
@@ -39,8 +52,56 @@ async def run_simulation(
 
     results: list[StepResult] = []
     for step in sorted(workflow, key=lambda s: s.order):
-        result = _execute_step(model, data, step, catalog, target_positions)
+        result = _execute_step(
+            model,
+            data,
+            step,
+            catalog,
+            target_positions,
+        )
         results.append(result)
+
+    metrics = compute_metrics(results)
+    return SimResult(steps=results, metrics=metrics)
+
+
+async def run_visual_simulation(
+    scene_path: Path,
+    workflow: list[WorkflowStep],
+    catalog: dict[str, EquipmentEntry],
+    target_positions: dict[str, tuple[float, float, float]],
+) -> SimResult:
+    """Run simulation with real-time MuJoCo viewer visualization.
+
+    Opens interactive viewer and plays each workflow step visually.
+
+    Args:
+        scene_path: Path to MJCF scene file.
+        workflow: Ordered workflow steps.
+        catalog: Equipment catalog for type dispatch.
+        target_positions: Named target positions (name -> xyz).
+
+    Returns:
+        Simulation result with per-step results and metrics.
+    """
+    import mujoco.viewer
+
+    model = mujoco.MjModel.from_xml_path(str(scene_path))
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+
+    with mujoco.viewer.launch_passive(model, data) as viewer:
+        results: list[StepResult] = []
+        for step in sorted(workflow, key=lambda s: s.order):
+            result = _execute_step(
+                model,
+                data,
+                step,
+                catalog,
+                target_positions,
+                viewer=viewer,
+            )
+            results.append(result)
 
     metrics = compute_metrics(results)
     return SimResult(steps=results, metrics=metrics)
@@ -71,12 +132,36 @@ def compute_metrics(results: list[StepResult]) -> SimMetrics:
     )
 
 
+def _make_on_step(
+    model: mujoco.MjModel,
+    viewer: _ViewerHandle | None,
+) -> Callable[[], None] | None:
+    """Create an on_step callback for viewer synchronization.
+
+    Args:
+        model: MuJoCo model (for timestep).
+        viewer: MuJoCo viewer, or None for headless mode.
+
+    Returns:
+        Callback that syncs and paces the viewer, or None.
+    """
+    if viewer is None:
+        return None
+
+    def _on_step() -> None:
+        viewer.sync()
+        time.sleep(model.opt.timestep)
+
+    return _on_step
+
+
 def _execute_step(
     model: mujoco.MjModel,
     data: mujoco.MjData,
     step: WorkflowStep,
     catalog: dict[str, EquipmentEntry],
     target_positions: dict[str, tuple[float, float, float]],
+    viewer: _ViewerHandle | None = None,
 ) -> StepResult:
     """Execute one workflow step via the appropriate controller.
 
@@ -86,12 +171,13 @@ def _execute_step(
         step: Workflow step to execute.
         catalog: Equipment catalog.
         target_positions: Named targets.
+        viewer: Optional MuJoCo viewer for real-time visualization.
 
     Returns:
         Step execution result.
     """
     if step.action == "wait":
-        return _sim_wait(model, data, step.duration_s)
+        return _sim_wait(model, data, step.duration_s, viewer=viewer)
 
     if step.equipment_id is None:
         return StepResult(
@@ -124,9 +210,10 @@ def _execute_step(
                 step,
                 target_pos,
                 entry,
+                viewer=viewer,
             )
         if entry.type == "conveyor":
-            return _sim_conveyor(model, data, step)
+            return _sim_conveyor(model, data, step, viewer=viewer)
         if entry.type == "camera":
             return _sim_camera_inspect(
                 model,
@@ -154,6 +241,7 @@ def _sim_wait(
     model: mujoco.MjModel,
     data: mujoco.MjData,
     duration_s: float,
+    viewer: _ViewerHandle | None = None,
 ) -> StepResult:
     """Simulate waiting by stepping physics forward.
 
@@ -161,6 +249,7 @@ def _sim_wait(
         model: MuJoCo model.
         data: MuJoCo data.
         duration_s: Wait duration in seconds.
+        viewer: Optional MuJoCo viewer for real-time visualization.
 
     Returns:
         Successful step result.
@@ -168,6 +257,9 @@ def _sim_wait(
     n_steps = int(duration_s / model.opt.timestep)
     for _ in range(n_steps):
         mujoco.mj_step(model, data)
+        if viewer is not None:
+            viewer.sync()
+            time.sleep(model.opt.timestep)
     return StepResult(success=True, duration_s=duration_s)
 
 
@@ -177,6 +269,7 @@ def _scripted_manipulation(
     step: WorkflowStep,
     target_pos: tuple[float, float, float],
     _entry: EquipmentEntry,
+    viewer: _ViewerHandle | None = None,
 ) -> StepResult:
     """Execute manipulator action using IK controller and grasp.
 
@@ -186,6 +279,7 @@ def _scripted_manipulation(
         step: Workflow step (pick/place/move).
         target_pos: Target position xyz.
         _entry: Equipment entry (reserved for future reach checks).
+        viewer: Optional MuJoCo viewer for real-time visualization.
 
     Returns:
         Step result with success/failure and timing.
@@ -204,10 +298,33 @@ def _scripted_manipulation(
     target = np.array(target_pos)
 
     if step.action == "pick":
-        return _execute_pick(model, data, ik, target, equipment_id, step)
+        return _execute_pick(
+            model,
+            data,
+            ik,
+            target,
+            equipment_id,
+            step,
+            viewer=viewer,
+        )
     if step.action == "place":
-        return _execute_place(model, data, ik, target, equipment_id, step)
-    return _execute_move(model, data, ik, target, step)
+        return _execute_place(
+            model,
+            data,
+            ik,
+            target,
+            equipment_id,
+            step,
+            viewer=viewer,
+        )
+    return _execute_move(
+        model,
+        data,
+        ik,
+        target,
+        step,
+        viewer=viewer,
+    )
 
 
 def _execute_pick(
@@ -217,6 +334,7 @@ def _execute_pick(
     target_pos: np.ndarray,
     equipment_id: str,
     step: WorkflowStep,
+    viewer: _ViewerHandle | None = None,
 ) -> StepResult:
     """Execute a pick action: reach, grasp, and lift.
 
@@ -227,11 +345,19 @@ def _execute_pick(
         target_pos: Target position to pick from.
         equipment_id: Equipment performing the pick.
         step: Workflow step.
+        viewer: Optional MuJoCo viewer for real-time visualization.
 
     Returns:
         Step result.
     """
-    if not ik.reach_target(target_pos, max_steps=1000, tolerance=0.05):
+    on_step = _make_on_step(model, viewer)
+
+    if not ik.reach_target(
+        target_pos,
+        max_steps=1000,
+        tolerance=0.05,
+        on_step=on_step,
+    ):
         return StepResult(
             success=False,
             duration_s=step.duration_s,
@@ -257,15 +383,24 @@ def _execute_pick(
     try:
         gm = GraspManager(model, data, gripper_body)
     except ValueError as exc:
-        return StepResult(success=False, duration_s=step.duration_s, error=str(exc))
+        return StepResult(
+            success=False,
+            duration_s=step.duration_s,
+            error=str(exc),
+        )
 
     attached = gm.attach(obj_name)
 
     lift_pos = target_pos.copy()
     lift_pos[2] += 0.1
-    ik.reach_target(lift_pos, max_steps=200, tolerance=0.05)
+    ik.reach_target(
+        lift_pos,
+        max_steps=200,
+        tolerance=0.05,
+        on_step=on_step,
+    )
 
-    collisions = _step_physics(model, data, 0.1)
+    collisions = _step_physics(model, data, 0.1, viewer=viewer)
 
     return StepResult(
         success=attached,
@@ -281,6 +416,7 @@ def _execute_place(
     target_pos: np.ndarray,
     equipment_id: str,
     step: WorkflowStep,
+    viewer: _ViewerHandle | None = None,
 ) -> StepResult:
     """Execute a place action: reach target, release object, settle.
 
@@ -291,11 +427,19 @@ def _execute_place(
         target_pos: Target position to place at.
         equipment_id: Equipment performing the place.
         step: Workflow step.
+        viewer: Optional MuJoCo viewer for real-time visualization.
 
     Returns:
         Step result.
     """
-    if not ik.reach_target(target_pos, max_steps=1000, tolerance=0.05):
+    on_step = _make_on_step(model, viewer)
+
+    if not ik.reach_target(
+        target_pos,
+        max_steps=1000,
+        tolerance=0.05,
+        on_step=on_step,
+    ):
         return StepResult(
             success=False,
             duration_s=step.duration_s,
@@ -304,7 +448,7 @@ def _execute_place(
 
     _deactivate_all_welds(model)
 
-    collisions = _step_physics(model, data, 0.2)
+    collisions = _step_physics(model, data, 0.2, viewer=viewer)
 
     return StepResult(
         success=True,
@@ -319,6 +463,7 @@ def _execute_move(
     ik: IKEngine,
     target_pos: np.ndarray,
     step: WorkflowStep,
+    viewer: _ViewerHandle | None = None,
 ) -> StepResult:
     """Execute a move action: reach target position.
 
@@ -328,12 +473,19 @@ def _execute_move(
         ik: IK engine for the manipulator.
         target_pos: Target position to move to.
         step: Workflow step.
+        viewer: Optional MuJoCo viewer for real-time visualization.
 
     Returns:
         Step result.
     """
-    reached = ik.reach_target(target_pos, max_steps=1000, tolerance=0.05)
-    collisions = _step_physics(model, data, 0.1)
+    on_step = _make_on_step(model, viewer)
+    reached = ik.reach_target(
+        target_pos,
+        max_steps=1000,
+        tolerance=0.05,
+        on_step=on_step,
+    )
+    collisions = _step_physics(model, data, 0.1, viewer=viewer)
 
     return StepResult(
         success=reached,
@@ -347,6 +499,7 @@ def _sim_conveyor(
     model: mujoco.MjModel,
     data: mujoco.MjData,
     step: WorkflowStep,
+    viewer: _ViewerHandle | None = None,
 ) -> StepResult:
     """Simulate conveyor transport with belt forces on contacting objects.
 
@@ -354,6 +507,7 @@ def _sim_conveyor(
         model: MuJoCo model.
         data: MuJoCo data.
         step: Workflow step with transport params.
+        viewer: Optional MuJoCo viewer for real-time visualization.
 
     Returns:
         Step result with collision count.
@@ -370,6 +524,9 @@ def _sim_conveyor(
             _apply_belt_forces(model, data, belt_geom_id, speed)
         mujoco.mj_step(model, data)
         collisions += data.ncon
+        if viewer is not None:
+            viewer.sync()
+            time.sleep(model.opt.timestep)
 
     return StepResult(
         success=True,
@@ -609,6 +766,7 @@ def _step_physics(
     model: mujoco.MjModel,
     data: mujoco.MjData,
     duration_s: float,
+    viewer: _ViewerHandle | None = None,
 ) -> int:
     """Step physics forward and count collisions.
 
@@ -616,6 +774,7 @@ def _step_physics(
         model: MuJoCo model.
         data: MuJoCo data.
         duration_s: Duration to simulate.
+        viewer: Optional MuJoCo viewer for real-time visualization.
 
     Returns:
         Number of contacts/collisions detected.
@@ -626,5 +785,8 @@ def _step_physics(
     for _ in range(min(n_steps, 1000)):
         mujoco.mj_step(model, data)
         total_contacts += data.ncon
+        if viewer is not None:
+            viewer.sync()
+            time.sleep(model.opt.timestep)
 
     return total_contacts
