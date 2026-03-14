@@ -175,6 +175,93 @@ Feature 4: Iteration visibility           ← Optimization demo
 
 ---
 
+### Feature 5: Point Cloud Quality (Module 1 — Capture)
+
+**Что**: Облако точек отображается неправильно — разреженное, перевёрнутое, висит под сценой. На скриншоте: ~1000 точек вместо десятков тысяч, Y-ось инвертирована.
+
+**Три корневые проблемы**:
+
+#### 5a: Координатная система — COLMAP vs Three.js
+
+COLMAP (OpenCV convention): X-right, **Y-down**, Z-forward.
+Three.js: X-right, **Y-up**, Z-toward-viewer.
+
+Текущий код (`reconstruction.py:198`): `points.append(point3d.xyz)` — никакой трансформации. Frontend (`SceneViewer3D.tsx`) читает координаты as-is. Результат: облако точек отрисовывается **перевёрнутым** — комната "висит" под сеткой.
+
+**Решение**: В `_export_pointcloud()` трансформировать координаты:
+```python
+# COLMAP (X, Y, Z) → Three.js (X, -Z, Y)  или  (X, -Y, -Z)
+transformed = np.column_stack([points[:, 0], -points[:, 1], -points[:, 2]])
+```
+
+#### 5b: Point cloud не пересчитывается при калибровке
+
+`calibrate_scale()` масштабирует mesh (OBJ) и MJCF, но **не облако точек** (PLY). После калибровки размеры на экране обновляются (1.24m × 1.15m), но point cloud в Three.js остаётся в старых координатах (12.4m × 11.5m). Визуально — облако огромное, а сетка маленькая.
+
+**Решение**: В `calibrate_scale()` также пересчитать PLY:
+```python
+def _rescale_pointcloud(ply_path: Path, scale_factor: float) -> None:
+    cloud = trimesh.load(ply_path)
+    cloud.vertices *= scale_factor
+    cloud.export(ply_path)
+```
+
+#### 5c: Разреженность — нужна dense reconstruction
+
+Текущий pipeline: COLMAP SfM → sparse points (300-1100 вершин). Это **структурные точки** из feature matching — их всегда мало.
+
+Для presentation quality нужна **dense reconstruction**: COLMAP MVS (Multi-View Stereo) или аналог. Это даёт 50K-500K точек — комната визуально узнаваема.
+
+**Решение (два варианта)**:
+
+**Вариант A — pycolmap dense stereo** (если доступен):
+```python
+mvs = pycolmap.PatchMatchStereo()
+mvs.run(output_dir / "dense", reconstruction)
+# → depth maps → dense point cloud
+```
+
+**Вариант B — увеличить sparse quality** (быстрый фикс):
+- `max_num_features = 32768` (вместо 8192)
+- `max_ratio = 0.8` (строже, но больше точных матчей)
+- `min_num_matches = 15` (фильтрация шума)
+- Добавить `sequential_matching` для смежных фото (улучшает покрытие)
+
+**Вариант B рекомендуется для MVP** — даёт 3-5x больше точек без major refactoring.
+
+#### 5d: Grid не соответствует масштабу
+
+Grid в Three.js: `gridHelper args={[10, 20]}` — фиксированный 10×10. Если point cloud 12m wide — он выходит за сетку. Если 1.2m — сетка в 10 раз больше.
+
+**Решение**: Динамический grid — размер = bounding box point cloud × 1.5.
+
+**Файлы**:
+- `backend/app/services/reconstruction.py` — coordinate transform, rescale PLY, quality settings
+- `backend/app/api/capture.py` — rescale PLY during calibration
+- `frontend/src/components/SceneViewer3D.tsx` — dynamic grid size
+
+**Commit**: `fix: point cloud coordinate transform, calibration rescale, dynamic grid`
+
+---
+
+## Updated Implementation Order
+
+```
+Feature 5: Point cloud quality fixes      ← Quick wins, immediate visual improvement
+    ↓
+Feature 1: Real models in scenes         ← Prerequisite for simulation
+    ↓
+Feature 2: Universal action executors     ← Makes simulation actually work
+    ↓
+Feature 3: Visual simulation mode         ← Client-facing demo
+    ↓
+Feature 4: Iteration visibility           ← Optimization demo
+```
+
+Feature 5 идёт **первой** потому что это быстрые фиксы (координаты, масштаб, grid) с немедленным визуальным эффектом на этапе Calibrate.
+
+---
+
 ## Available Resources
 
 ### Robot Models (robot_descriptions 1.23.0)
