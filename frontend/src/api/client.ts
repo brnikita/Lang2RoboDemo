@@ -6,6 +6,8 @@
 import type {
   Dimensions,
   IterationLog,
+  ProjectDetail,
+  ProjectStatus,
   Recommendation,
   ReferenceCalibration,
   SimResult,
@@ -33,6 +35,23 @@ async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+/**
+ * List all projects sorted by last update.
+ * @returns Array of project statuses.
+ */
+export async function listProjects(): Promise<ProjectStatus[]> {
+  return apiFetch<ProjectStatus[]>("/projects");
+}
+
+/**
+ * Get full project detail for state restoration.
+ * @param projectId - Project identifier.
+ * @returns Project status with all available phase data.
+ */
+export async function getProject(projectId: string): Promise<ProjectDetail> {
+  return apiFetch<ProjectDetail>(`/projects/${projectId}`);
 }
 
 /** Response from photo upload endpoint. */

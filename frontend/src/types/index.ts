@@ -209,3 +209,39 @@ export interface IterationLog {
   metrics: SimMetrics;
   corrections_applied: SceneCorrections;
 }
+
+// ── Project Models ──
+
+/** Pipeline phase identifiers. */
+export type PipelinePhase =
+  | "upload"
+  | "calibrate"
+  | "recommend"
+  | "build-scene"
+  | "simulate"
+  | "iterate";
+
+/** Record of a completed pipeline phase. */
+export interface PhaseRecord {
+  phase: PipelinePhase;
+  completed_at: string;
+}
+
+/** Project status stored in status.json. */
+export interface ProjectStatus {
+  id: string;
+  name: string;
+  current_phase: PipelinePhase;
+  created_at: string;
+  updated_at: string;
+  phases_completed: PhaseRecord[];
+}
+
+/** Full project data for state restoration. */
+export interface ProjectDetail {
+  status: ProjectStatus;
+  dimensions: Dimensions | null;
+  recommendation: Recommendation | null;
+  sim_result: SimResult | null;
+  iteration_history: IterationLog[];
+}
