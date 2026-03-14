@@ -14,7 +14,7 @@ _IK_ALPHA = 0.5
 _EXCLUDED_ACTUATOR_KEYWORDS = ("conveyor", "belt")
 
 _EE_SITE_NAMES: dict[str, str] = {
-    "ufactory_xarm7": "attachment_site",
+    "ufactory_xarm7": "link_tcp",
     "franka_emika_panda": "end_effector",
     "universal_robots_ur5e": "attachment_site",
     "aloha": "left/gripper",
@@ -24,6 +24,7 @@ _EE_SITE_NAMES: dict[str, str] = {
 }
 
 _FALLBACK_SITE_NAMES = (
+    "link_tcp",
     "attachment_site",
     "end_effector",
     "grip_site",

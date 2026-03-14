@@ -124,26 +124,23 @@ def _fetch_from_robot_descriptions(
     """Fetch model from robot_descriptions package.
 
     Args:
-        description_id: robot_descriptions model ID.
+        description_id: robot_descriptions model ID (e.g. "xarm7_mj_description").
         cache_dir: Local cache directory.
 
     Returns:
         Cache directory path with model files.
     """
-    import robot_descriptions
+    import importlib
 
     try:
-        desc = getattr(robot_descriptions, description_id.upper(), None)
-        if desc is None:
-            desc = robot_descriptions.DESCRIPTIONS.get(description_id)
-
-        if desc and hasattr(desc, "MJCF_PATH"):
-            src_path = Path(desc.MJCF_PATH)
+        module = importlib.import_module(f"robot_descriptions.{description_id}")
+        if hasattr(module, "MJCF_PATH"):
+            src_path = Path(module.MJCF_PATH)
             _copy_model_tree(src_path, cache_dir)
             return cache_dir
-    except Exception as exc:
+    except (ImportError, ModuleNotFoundError) as exc:
         logger.warning(
-            "Failed to load %s from robot_descriptions: %s",
+            "Failed to import robot_descriptions.%s: %s",
             description_id,
             exc,
         )
