@@ -501,12 +501,10 @@ def _merge_top_level_sections(
         if tag in singleton_tags:
             if scene_section is None:
                 scene_root.insert(0, robot_section)
+        elif scene_section is None:
+            scene_root.append(robot_section)
         else:
-            if scene_section is None:
-                scene_root.append(robot_section)
-            else:
-                for child in robot_section:
-                    scene_section.append(child)
+            _append_unique_children(scene_section, robot_section)
 
 
 def _add_conveyor_to_scene(
@@ -763,6 +761,39 @@ def _add_cameras(
                 "fovy": str(int(fov)),
             },
         )
+
+
+def _append_unique_children(
+    scene_section: ET.Element,
+    robot_section: ET.Element,
+) -> None:
+    """Append children from robot section, skipping duplicates.
+
+    Deduplicates by tag + class/name attribute to prevent
+    repeated default class errors on scene rebuild.
+
+    Args:
+        scene_section: Existing scene section element.
+        robot_section: Robot section to merge from.
+    """
+    existing_keys = _collect_child_keys(scene_section)
+    for child in robot_section:
+        key = (child.tag, child.get("class") or child.get("name") or "")
+        if key not in existing_keys:
+            scene_section.append(child)
+            existing_keys.add(key)
+
+
+def _collect_child_keys(section: ET.Element) -> set[tuple[str, str]]:
+    """Collect unique keys for children of a section.
+
+    Args:
+        section: XML element.
+
+    Returns:
+        Set of (tag, class_or_name) keys.
+    """
+    return {(c.tag, c.get("class") or c.get("name") or "") for c in section}
 
 
 def _format_pos(position: tuple[float, float, float]) -> str:
