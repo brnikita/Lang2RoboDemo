@@ -453,6 +453,7 @@ def _resolve_meshdir(
         raw = compiler.get("meshdir")
         if raw:
             meshdir = (model_dir / raw).resolve()
+        compiler.set("meshdir", str(meshdir).replace("\\", "/"))
     asset = robot_root.find("asset")
     if asset is None:
         return
