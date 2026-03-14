@@ -12,6 +12,7 @@ from backend.app.models.recommendation import (
     WorkObject,
 )
 from backend.app.models.space import Dimensions, SpaceModel
+from backend.app.services.downloader import find_mjcf_in_dir
 
 __all__ = ["generate_mjcf_scene", "validate_mjcf"]
 
@@ -275,14 +276,14 @@ def _add_existing_equipment(
 
 
 def _add_new_equipment(
-    _root: ET.Element,
+    root: ET.Element,
     worldbody: ET.Element,
     placements: list[EquipmentPlacement],
-    _model_dirs: dict[str, Path],
+    model_dirs: dict[str, Path],
     catalog: dict[str, EquipmentEntry],
-    _scene_dir: Path,
+    scene_dir: Path,
 ) -> None:
-    """Add new equipment from recommendation.
+    """Add new equipment from recommendation, dispatching by type.
 
     Args:
         root: Root mujoco element (for includes).
@@ -298,35 +299,393 @@ def _add_new_equipment(
         if not entry:
             continue
 
-        # Ensure unique body names for MuJoCo
         count = name_counts.get(placement.equipment_id, 0)
         name_counts[placement.equipment_id] = count + 1
         body_name = placement.equipment_id if count == 0 else f"{placement.equipment_id}_{count}"
 
-        pos = _format_pos(placement.position)
-        euler = f"0 0 {math.radians(placement.orientation_deg):.4f}"
+        if entry.type == "manipulator":
+            _add_manipulator_to_scene(
+                root,
+                worldbody,
+                placement,
+                body_name,
+                model_dirs,
+                scene_dir,
+            )
+        elif entry.type == "conveyor":
+            _add_conveyor_to_scene(root, worldbody, placement, body_name, entry)
+        elif entry.type == "camera":
+            _add_camera_body_to_scene(worldbody, placement, body_name, entry)
+        else:
+            _add_fixture_to_scene(worldbody, placement, body_name, entry)
 
-        body = ET.SubElement(
+
+def _add_manipulator_to_scene(
+    root: ET.Element,
+    worldbody: ET.Element,
+    placement: EquipmentPlacement,
+    body_name: str,
+    model_dirs: dict[str, Path],
+    _scene_dir: Path,
+) -> None:
+    """Inline real MJCF model for a manipulator.
+
+    Parses the robot MJCF file, merges top-level sections (compiler,
+    default, asset, actuator, etc.) into the scene root, and places
+    the robot's body tree inside a positioning wrapper body.
+
+    Args:
+        root: Root mujoco element for merging top-level sections.
+        worldbody: Worldbody XML element.
+        placement: Equipment placement data.
+        body_name: Unique body name.
+        model_dirs: Model directory mapping.
+        scene_dir: Scene directory for relative paths.
+    """
+    model_dir = model_dirs.get(placement.equipment_id)
+    mjcf_file = find_mjcf_in_dir(model_dir) if model_dir else None
+
+    if mjcf_file:
+        _inline_robot_model(
+            root,
             worldbody,
-            "body",
+            mjcf_file,
+            placement,
+            body_name,
+        )
+    else:
+        _add_fallback_box(worldbody, placement, body_name)
+
+
+def _inline_robot_model(
+    root: ET.Element,
+    worldbody: ET.Element,
+    mjcf_file: Path,
+    placement: EquipmentPlacement,
+    body_name: str,
+) -> None:
+    """Parse robot MJCF and inline it into the scene.
+
+    Merges top-level sections into root and places body tree
+    inside a wrapper body at the desired position.
+
+    Args:
+        root: Root mujoco element.
+        worldbody: Worldbody XML element.
+        mjcf_file: Path to robot MJCF file.
+        placement: Equipment placement data.
+        body_name: Unique body name.
+    """
+    robot_tree = ET.parse(str(mjcf_file))
+    robot_root = robot_tree.getroot()
+
+    _resolve_meshdir(robot_root, mjcf_file.parent)
+    _merge_top_level_sections(root, robot_root)
+
+    pos = _format_pos(placement.position)
+    euler = f"0 0 {math.radians(placement.orientation_deg):.4f}"
+    wrapper = ET.SubElement(
+        worldbody,
+        "body",
+        {"name": body_name, "pos": pos, "euler": euler},
+    )
+
+    robot_wb = robot_root.find("worldbody")
+    if robot_wb is not None:
+        for child in robot_wb:
+            if child.tag == "light":
+                continue
+            wrapper.append(child)
+
+    _ensure_ee_site(wrapper)
+
+
+def _ensure_ee_site(wrapper: ET.Element) -> None:
+    """Add end-effector site to deepest body if none exists.
+
+    Args:
+        wrapper: Robot wrapper body element.
+    """
+    if wrapper.find(".//site") is not None:
+        return
+    deepest = _find_deepest_body(wrapper)
+    if deepest is not None:
+        ET.SubElement(
+            deepest,
+            "site",
             {
-                "name": body_name,
-                "pos": pos,
-                "euler": euler,
+                "name": "end_effector",
+                "pos": "0 0 0",
+                "size": "0.01",
             },
         )
 
-        size = _equipment_half_size(entry)
+
+def _find_deepest_body(element: ET.Element) -> ET.Element | None:
+    """Find the deepest body in a kinematic chain.
+
+    Args:
+        element: Root element to search.
+
+    Returns:
+        Deepest body element, or None.
+    """
+    bodies = list(element.iter("body"))
+    return bodies[-1] if bodies else None
+
+
+def _resolve_meshdir(
+    robot_root: ET.Element,
+    model_dir: Path,
+) -> None:
+    """Resolve meshdir so mesh paths are absolute.
+
+    Updates mesh file attributes in asset to use absolute paths
+    based on the compiler meshdir setting.
+
+    Args:
+        robot_root: Robot MJCF root element.
+        model_dir: Directory containing the robot MJCF file.
+    """
+    compiler = robot_root.find("compiler")
+    meshdir = model_dir.resolve()
+    if compiler is not None:
+        raw = compiler.get("meshdir")
+        if raw:
+            meshdir = (model_dir / raw).resolve()
+        compiler.set("meshdir", str(meshdir).replace("\\", "/"))
+    asset = robot_root.find("asset")
+    if asset is None:
+        return
+    for mesh in asset.findall("mesh"):
+        file_attr = mesh.get("file")
+        if file_attr and not Path(file_attr).is_absolute():
+            abs_path = str(meshdir / file_attr).replace("\\", "/")
+            mesh.set("file", abs_path)
+
+
+_MERGEABLE_SECTIONS = [
+    "compiler",
+    "option",
+    "size",
+    "default",
+    "asset",
+    "tendon",
+    "equality",
+    "actuator",
+    "sensor",
+    "keyframe",
+    "contact",
+]
+
+
+def _merge_top_level_sections(
+    scene_root: ET.Element,
+    robot_root: ET.Element,
+) -> None:
+    """Merge robot top-level MJCF sections into the scene root.
+
+    For container sections (asset, actuator, etc.), children are
+    appended. For singleton sections (compiler, option), they are
+    added only if not already present.
+
+    Args:
+        scene_root: Scene mujoco root element.
+        robot_root: Robot mujoco root element.
+    """
+    singleton_tags = {"compiler", "option", "size"}
+    for tag in _MERGEABLE_SECTIONS:
+        robot_section = robot_root.find(tag)
+        if robot_section is None:
+            continue
+        scene_section = scene_root.find(tag)
+        if tag in singleton_tags:
+            if scene_section is None:
+                scene_root.insert(0, robot_section)
+        elif scene_section is None:
+            scene_root.append(robot_section)
+        else:
+            _append_unique_children(scene_section, robot_section)
+
+
+def _add_conveyor_to_scene(
+    root: ET.Element,
+    worldbody: ET.Element,
+    placement: EquipmentPlacement,
+    body_name: str,
+    entry: EquipmentEntry,
+) -> None:
+    """Add parametric conveyor with belt surface, rollers, and frame.
+
+    Args:
+        root: Root mujoco element.
+        worldbody: Worldbody XML element.
+        placement: Equipment placement data.
+        body_name: Unique body name.
+        entry: Equipment catalog entry.
+    """
+    specs = entry.specs
+    length = float(specs.get("length_m", 0.5))
+    width = float(specs.get("width_m", 0.15))
+    height = float(specs.get("height_m", 0.85))
+
+    pos = _format_pos(placement.position)
+    euler = f"0 0 {math.radians(placement.orientation_deg):.4f}"
+    body = ET.SubElement(
+        worldbody,
+        "body",
+        {"name": body_name, "pos": pos, "euler": euler},
+    )
+
+    half_l = length / 2
+    half_w = width / 2
+
+    # Belt surface (high friction)
+    ET.SubElement(
+        body,
+        "geom",
+        {
+            "name": f"{body_name}_belt",
+            "type": "box",
+            "size": f"{half_l:.3f} {half_w:.3f} 0.005",
+            "pos": f"0 0 {height:.3f}",
+            "friction": "1 0.005 0.0001",
+            "rgba": "0.3 0.3 0.3 1",
+        },
+    )
+
+    # Support frame
+    ET.SubElement(
+        body,
+        "geom",
+        {
+            "name": f"{body_name}_frame",
+            "type": "box",
+            "size": f"{half_l:.3f} {half_w + 0.01:.3f} {height / 2:.3f}",
+            "pos": f"0 0 {height / 2:.3f}",
+            "rgba": "0.4 0.4 0.5 1",
+        },
+    )
+
+    # End rollers
+    for side, x_off in [("left", -half_l), ("right", half_l)]:
         ET.SubElement(
             body,
             "geom",
             {
-                "name": f"{body_name}_geom",
-                "type": "box",
-                "size": f"{size[0]:.3f} {size[1]:.3f} {size[2]:.3f}",
-                "rgba": _equipment_color(entry.type),
+                "name": f"{body_name}_roller_{side}",
+                "type": "cylinder",
+                "size": f"0.02 {half_w:.3f}",
+                "pos": f"{x_off:.3f} 0 {height:.3f}",
+                "euler": "1.5708 0 0",
+                "rgba": "0.5 0.5 0.5 1",
             },
         )
+
+    # Ensure actuator section exists (for Phase 4 belt velocity)
+    actuator = root.find("actuator")
+    if actuator is None:
+        ET.SubElement(root, "actuator")
+
+
+def _add_camera_body_to_scene(
+    worldbody: ET.Element,
+    placement: EquipmentPlacement,
+    body_name: str,
+    entry: EquipmentEntry,
+) -> None:
+    """Add camera housing body.
+
+    Args:
+        worldbody: Worldbody XML element.
+        placement: Equipment placement data.
+        body_name: Unique body name.
+        entry: Equipment catalog entry.
+    """
+    height = float(entry.specs.get("mounting_height_m", 1.5))
+    body = ET.SubElement(
+        worldbody,
+        "body",
+        {
+            "name": body_name,
+            "pos": f"{placement.position[0]:.3f} {placement.position[1]:.3f} {height:.3f}",
+        },
+    )
+    ET.SubElement(
+        body,
+        "geom",
+        {
+            "name": f"{body_name}_housing",
+            "type": "box",
+            "size": "0.03 0.03 0.02",
+            "rgba": "0.15 0.15 0.15 1",
+        },
+    )
+
+
+def _add_fixture_to_scene(
+    worldbody: ET.Element,
+    placement: EquipmentPlacement,
+    body_name: str,
+    entry: EquipmentEntry,
+) -> None:
+    """Add fixture as static box geom.
+
+    Args:
+        worldbody: Worldbody XML element.
+        placement: Equipment placement data.
+        body_name: Unique body name.
+        entry: Equipment catalog entry.
+    """
+    pos = _format_pos(placement.position)
+    euler = f"0 0 {math.radians(placement.orientation_deg):.4f}"
+    body = ET.SubElement(
+        worldbody,
+        "body",
+        {"name": body_name, "pos": pos, "euler": euler},
+    )
+    size = _equipment_half_size(entry)
+    ET.SubElement(
+        body,
+        "geom",
+        {
+            "name": f"{body_name}_geom",
+            "type": "box",
+            "size": f"{size[0]:.3f} {size[1]:.3f} {size[2]:.3f}",
+            "rgba": _equipment_color(entry.type),
+        },
+    )
+
+
+def _add_fallback_box(
+    worldbody: ET.Element,
+    placement: EquipmentPlacement,
+    body_name: str,
+) -> None:
+    """Add a generic fallback box when no model is available.
+
+    Args:
+        worldbody: Worldbody XML element.
+        placement: Equipment placement data.
+        body_name: Unique body name.
+    """
+    pos = _format_pos(placement.position)
+    euler = f"0 0 {math.radians(placement.orientation_deg):.4f}"
+    body = ET.SubElement(
+        worldbody,
+        "body",
+        {"name": body_name, "pos": pos, "euler": euler},
+    )
+    ET.SubElement(
+        body,
+        "geom",
+        {
+            "name": f"{body_name}_geom",
+            "type": "box",
+            "size": "0.15 0.15 0.15",
+            "rgba": "0.8 0.2 0.2 1",
+        },
+    )
 
 
 def _add_work_objects(
@@ -403,6 +762,59 @@ def _add_cameras(
                 "fovy": str(int(fov)),
             },
         )
+
+
+def _append_unique_children(
+    scene_section: ET.Element,
+    robot_section: ET.Element,
+) -> None:
+    """Append children from robot section, skipping duplicates.
+
+    Deduplicates by tag + class/name attribute to prevent
+    repeated default class errors on scene rebuild.
+
+    Args:
+        scene_section: Existing scene section element.
+        robot_section: Robot section to merge from.
+    """
+    existing_keys = _collect_child_keys(scene_section)
+    for child in robot_section:
+        key = _child_key(child)
+        if key not in existing_keys:
+            scene_section.append(child)
+            existing_keys.add(key)
+
+
+def _child_key(element: ET.Element) -> tuple[str, ...]:
+    """Create a unique key for an XML element.
+
+    Uses tag + name + class + file to distinguish elements.
+    File is needed for mesh elements without name attributes.
+
+    Args:
+        element: XML element.
+
+    Returns:
+        Tuple key for deduplication.
+    """
+    return (
+        element.tag,
+        element.get("name", ""),
+        element.get("class", ""),
+        element.get("file", ""),
+    )
+
+
+def _collect_child_keys(section: ET.Element) -> set[tuple[str, ...]]:
+    """Collect unique keys for children of a section.
+
+    Args:
+        section: XML element.
+
+    Returns:
+        Set of (tag, name, class) keys.
+    """
+    return {_child_key(c) for c in section}
 
 
 def _format_pos(position: tuple[float, float, float]) -> str:

@@ -65,7 +65,6 @@ export function SceneViewer3D({
         >
           <ambientLight intensity={0.5} />
           <directionalLight position={[5, 5, 5]} intensity={1} />
-          <gridHelper args={[10, 20, "#333333", "#1a1a1a"]} />
           <axesHelper args={[1]} />
           {pointCloudUrl && (
             <PointCloud url={pointCloudUrl} onError={setLoadError} />
@@ -142,9 +141,35 @@ interface PointCloudProps {
  * @param props - URL and error callback.
  * @returns Three.js points object.
  */
+/** State for loaded point cloud geometry and computed grid size. */
+interface PointCloudState {
+  geometry: THREE.BufferGeometry;
+  gridSize: number;
+}
+
+/**
+ * Compute dynamic grid size from geometry bounding box.
+ * @param geometry - Point cloud geometry.
+ * @returns Grid size clamped to [1, 50].
+ */
+function computeGridSize(geometry: THREE.BufferGeometry): number {
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox;
+  if (!box) return 10;
+  const extentX = box.max.x - box.min.x;
+  const extentZ = box.max.z - box.min.z;
+  const raw = Math.max(extentX, extentZ) * 1.5;
+  return Math.max(1, Math.min(50, raw));
+}
+
+/**
+ * Three.js component that loads and renders a PLY point cloud.
+ * @param props - URL and error callback.
+ * @returns Three.js points object with adaptive grid.
+ */
 function PointCloud({ url, onError }: PointCloudProps): React.JSX.Element | null {
   const pointsRef = useRef<THREE.Points>(null);
-  const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
+  const [state, setState] = useState<PointCloudState | null>(null);
   const { camera } = useThree();
 
   useEffect(() => {
@@ -152,9 +177,7 @@ function PointCloud({ url, onError }: PointCloudProps): React.JSX.Element | null
 
     fetch(url)
       .then((res) => {
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.arrayBuffer();
       })
       .then((buffer) => {
@@ -164,30 +187,31 @@ function PointCloud({ url, onError }: PointCloudProps): React.JSX.Element | null
           onError("Point cloud is empty");
           return;
         }
-        setGeometry(geom);
+        setState({ geometry: geom, gridSize: computeGridSize(geom) });
         onError(null);
         fitCameraToGeometry(camera as THREE.PerspectiveCamera, geom);
       })
-      .catch((err) => {
-        if (!cancelled) {
-          onError(`Could not load point cloud: ${err.message}`);
-        }
+      .catch((err: Error) => {
+        if (!cancelled) onError(`Could not load point cloud: ${err.message}`);
       });
 
     return () => { cancelled = true; };
   }, [url, camera, onError]);
 
-  if (!geometry) return null;
+  if (!state) return null;
 
   return (
-    <points ref={pointsRef} geometry={geometry}>
-      <pointsMaterial
-        size={0.008}
-        vertexColors={geometry.getAttribute("color") !== null}
-        color={geometry.getAttribute("color") ? undefined : "#6cb0e0"}
-        sizeAttenuation
-      />
-    </points>
+    <>
+      <gridHelper args={[state.gridSize, 20, "#333333", "#1a1a1a"]} />
+      <points ref={pointsRef} geometry={state.geometry}>
+        <pointsMaterial
+          size={0.008}
+          vertexColors={state.geometry.getAttribute("color") !== null}
+          color={state.geometry.getAttribute("color") ? undefined : "#6cb0e0"}
+          sizeAttenuation
+        />
+      </points>
+    </>
   );
 }
 

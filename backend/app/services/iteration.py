@@ -2,6 +2,7 @@
 
 import json
 import logging
+import math
 import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -20,7 +21,13 @@ from backend.app.models.recommendation import EquipmentPlacement, Recommendation
 from backend.app.models.simulation import SimMetrics, SimResult
 from backend.app.services.catalog import validate_equipment_id
 from backend.app.services.downloader import download_equipment_model
-from backend.app.services.scene import _equipment_color, _equipment_half_size, _format_pos
+from backend.app.services.scene import (
+    _add_camera_body_to_scene,
+    _add_conveyor_to_scene,
+    _add_fixture_to_scene,
+    _add_manipulator_to_scene,
+    _format_pos,
+)
 from backend.app.services.simulator import run_simulation
 
 __all__ = [
@@ -189,17 +196,32 @@ async def apply_corrections(
         for eq_id in corrections.remove_equipment:
             _remove_body(worldbody, eq_id)
 
+    scene_dir = output_path.parent
+
     if corrections.replace_equipment:
         for replacement in corrections.replace_equipment:
             entry = validate_equipment_id(replacement.new_equipment_id, catalog)
-            await download_equipment_model(entry)
-            _replace_body(worldbody, replacement, entry)
+            model_dir = await download_equipment_model(entry)
+            _replace_body(
+                root,
+                worldbody,
+                replacement,
+                entry,
+                model_dir,
+                scene_dir,
+            )
 
     if corrections.add_equipment:
         for placement in corrections.add_equipment:
             entry = catalog.get(placement.equipment_id)
             if entry:
-                _add_equipment_body(worldbody, placement, entry)
+                await _add_equipment_body(
+                    root,
+                    worldbody,
+                    placement,
+                    entry,
+                    scene_dir,
+                )
 
     ET.indent(tree, space="  ")
     tree.write(str(output_path), encoding="unicode", xml_declaration=False)
@@ -305,8 +327,6 @@ def _apply_position_change(worldbody: ET.Element, change: PositionChange) -> Non
         if body.get("name") == change.equipment_id:
             body.set("pos", _format_pos(change.new_position))
             if change.new_orientation_deg is not None:
-                import math
-
                 euler = f"0 0 {math.radians(change.new_orientation_deg):.4f}"
                 body.set("euler", euler)
             return
@@ -326,78 +346,138 @@ def _remove_body(worldbody: ET.Element, equipment_id: str) -> None:
 
 
 def _replace_body(
+    root: ET.Element,
     worldbody: ET.Element,
     replacement: EquipmentReplacement,
     new_entry: EquipmentEntry,
+    model_dir: Path | None,
+    scene_dir: Path,
 ) -> None:
-    """Replace one equipment body with another.
+    """Replace one equipment body with another using real models.
 
     Args:
+        root: Root mujoco element (for includes/actuators).
         worldbody: Worldbody XML element.
         replacement: EquipmentReplacement with old/new IDs.
         new_entry: New equipment catalog entry.
+        model_dir: Downloaded model directory (or None).
+        scene_dir: Scene directory for relative paths.
     """
     for body in worldbody.findall("body"):
         if body.get("name") == replacement.old_equipment_id:
-            pos = body.get("pos", "0 0 0")
-            euler = body.get("euler", "0 0 0")
+            pos_str = body.get("pos", "0 0 0")
+            euler_str = body.get("euler", "0 0 0")
             worldbody.remove(body)
+            break
+    else:
+        return
 
-            new_body = ET.SubElement(
-                worldbody,
-                "body",
-                {
-                    "name": replacement.new_equipment_id,
-                    "pos": pos,
-                    "euler": euler,
-                },
-            )
-            size = _equipment_half_size(new_entry)
-            ET.SubElement(
-                new_body,
-                "geom",
-                {
-                    "name": f"{replacement.new_equipment_id}_geom",
-                    "type": "box",
-                    "size": f"{size[0]:.3f} {size[1]:.3f} {size[2]:.3f}",
-                    "rgba": _equipment_color(new_entry.type),
-                },
-            )
-            return
+    pos_parts = [float(p) for p in pos_str.split()]
+    position = (pos_parts[0], pos_parts[1], pos_parts[2])
+    orientation = _euler_to_deg(euler_str)
+
+    placement = EquipmentPlacement(
+        equipment_id=replacement.new_equipment_id,
+        position=position,
+        orientation_deg=orientation,
+        purpose="replacement",
+        zone="default",
+    )
+    model_dirs = {replacement.new_equipment_id: model_dir} if model_dir else {}
+
+    _dispatch_add_equipment(
+        root,
+        worldbody,
+        placement,
+        replacement.new_equipment_id,
+        new_entry,
+        model_dirs,
+        scene_dir,
+    )
 
 
-def _add_equipment_body(
+async def _add_equipment_body(
+    root: ET.Element,
     worldbody: ET.Element,
     placement: EquipmentPlacement,
     entry: EquipmentEntry,
+    scene_dir: Path,
 ) -> None:
-    """Add a new equipment body to the scene.
+    """Add a new equipment body using real model by type.
 
     Args:
+        root: Root mujoco element (for includes/actuators).
         worldbody: Worldbody XML element.
         placement: EquipmentPlacement.
         entry: Equipment catalog entry.
+        scene_dir: Scene directory for relative paths.
     """
-    pos = _format_pos(placement.position)
-    body = ET.SubElement(
+    model_dirs: dict[str, Path] = {}
+    if entry.type == "manipulator":
+        model_dir = await download_equipment_model(entry)
+        model_dirs[placement.equipment_id] = model_dir
+
+    _dispatch_add_equipment(
+        root,
         worldbody,
-        "body",
-        {
-            "name": placement.equipment_id,
-            "pos": pos,
-        },
+        placement,
+        placement.equipment_id,
+        entry,
+        model_dirs,
+        scene_dir,
     )
-    size = _equipment_half_size(entry)
-    ET.SubElement(
-        body,
-        "geom",
-        {
-            "name": f"{placement.equipment_id}_geom",
-            "type": "box",
-            "size": f"{size[0]:.3f} {size[1]:.3f} {size[2]:.3f}",
-            "rgba": _equipment_color(entry.type),
-        },
-    )
+
+
+def _dispatch_add_equipment(
+    root: ET.Element,
+    worldbody: ET.Element,
+    placement: EquipmentPlacement,
+    body_name: str,
+    entry: EquipmentEntry,
+    model_dirs: dict[str, Path],
+    scene_dir: Path,
+) -> None:
+    """Dispatch equipment addition by type, using real models.
+
+    Args:
+        root: Root mujoco element.
+        worldbody: Worldbody XML element.
+        placement: Equipment placement data.
+        body_name: Unique body name.
+        entry: Equipment catalog entry.
+        model_dirs: Model directory mapping.
+        scene_dir: Scene directory for relative paths.
+    """
+    if entry.type == "manipulator":
+        _add_manipulator_to_scene(
+            root,
+            worldbody,
+            placement,
+            body_name,
+            model_dirs,
+            scene_dir,
+        )
+    elif entry.type == "conveyor":
+        _add_conveyor_to_scene(root, worldbody, placement, body_name, entry)
+    elif entry.type == "camera":
+        _add_camera_body_to_scene(worldbody, placement, body_name, entry)
+    else:
+        _add_fixture_to_scene(worldbody, placement, body_name, entry)
+
+
+def _euler_to_deg(euler_str: str) -> float:
+    """Extract Z-axis rotation in degrees from euler attribute.
+
+    Args:
+        euler_str: Space-separated euler angles string (radians).
+
+    Returns:
+        Z-axis rotation in degrees.
+    """
+    parts = euler_str.split()
+    if len(parts) >= 3:
+        return math.degrees(float(parts[2]))
+    return 0.0
 
 
 def _extract_json(text: str) -> str:

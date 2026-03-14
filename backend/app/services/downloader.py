@@ -10,7 +10,7 @@ from backend.app.core.config import get_settings
 from backend.app.models.equipment import EquipmentEntry
 from backend.app.services.catalog import load_equipment_catalog
 
-__all__ = ["download_equipment_models", "download_equipment_model"]
+__all__ = ["download_equipment_models", "download_equipment_model", "find_mjcf_in_dir"]
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,51 @@ def _is_cached(cache_dir: Path) -> bool:
     """
     if not cache_dir.exists():
         return False
-    return any(cache_dir.iterdir())
+    return any(cache_dir.rglob("*.xml"))
+
+
+def find_mjcf_in_dir(model_dir: Path) -> Path | None:
+    """Find the main MJCF entry point in a model directory.
+
+    Prefers robot-specific XML (e.g. panda.xml, xarm7.xml) over scene.xml,
+    because scene.xml is typically a Menagerie wrapper with includes.
+
+    Args:
+        model_dir: Directory containing model files.
+
+    Returns:
+        Path to main MJCF file, or None if not found.
+    """
+    if model_dir is None or not model_dir.exists():
+        return None
+    direct = model_dir / f"{model_dir.name}.xml"
+    if direct.exists():
+        return direct
+    robot_xml = _find_robot_xml(model_dir)
+    if robot_xml:
+        return robot_xml
+    scene = model_dir / "scene.xml"
+    if scene.exists():
+        return scene
+    xmls = sorted(model_dir.glob("*.xml"))
+    return xmls[0] if xmls else None
+
+
+def _find_robot_xml(model_dir: Path) -> Path | None:
+    """Find robot-specific XML, excluding wrappers and variants.
+
+    Args:
+        model_dir: Model directory.
+
+    Returns:
+        Robot XML path or None.
+    """
+    skip = {"scene.xml", "hand.xml"}
+    for xml in sorted(model_dir.glob("*.xml")):
+        if xml.name in skip or xml.name.startswith("mjx_"):
+            continue
+        return xml
+    return None
 
 
 def _fetch_from_robot_descriptions(
@@ -102,26 +146,23 @@ def _fetch_from_robot_descriptions(
     """Fetch model from robot_descriptions package.
 
     Args:
-        description_id: robot_descriptions model ID.
+        description_id: robot_descriptions model ID (e.g. "xarm7_mj_description").
         cache_dir: Local cache directory.
 
     Returns:
         Cache directory path with model files.
     """
-    import robot_descriptions
+    import importlib
 
     try:
-        desc = getattr(robot_descriptions, description_id.upper(), None)
-        if desc is None:
-            desc = robot_descriptions.DESCRIPTIONS.get(description_id)
-
-        if desc and hasattr(desc, "MJCF_PATH"):
-            src_path = Path(desc.MJCF_PATH)
+        module = importlib.import_module(f"robot_descriptions.{description_id}")
+        if hasattr(module, "MJCF_PATH"):
+            src_path = Path(module.MJCF_PATH)
             _copy_model_tree(src_path, cache_dir)
             return cache_dir
-    except Exception as exc:
+    except (ImportError, ModuleNotFoundError) as exc:
         logger.warning(
-            "Failed to load %s from robot_descriptions: %s",
+            "Failed to import robot_descriptions.%s: %s",
             description_id,
             exc,
         )
