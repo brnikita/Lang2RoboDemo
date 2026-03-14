@@ -779,22 +779,37 @@ def _append_unique_children(
     """
     existing_keys = _collect_child_keys(scene_section)
     for child in robot_section:
-        key = (child.tag, child.get("class") or child.get("name") or "")
+        key = _child_key(child)
         if key not in existing_keys:
             scene_section.append(child)
             existing_keys.add(key)
 
 
-def _collect_child_keys(section: ET.Element) -> set[tuple[str, str]]:
+def _child_key(element: ET.Element) -> tuple[str, str, str]:
+    """Create a unique key for an XML element.
+
+    Uses tag + name + class to distinguish elements like
+    materials with same class but different names.
+
+    Args:
+        element: XML element.
+
+    Returns:
+        (tag, name, class) tuple.
+    """
+    return (element.tag, element.get("name", ""), element.get("class", ""))
+
+
+def _collect_child_keys(section: ET.Element) -> set[tuple[str, str, str]]:
     """Collect unique keys for children of a section.
 
     Args:
         section: XML element.
 
     Returns:
-        Set of (tag, class_or_name) keys.
+        Set of (tag, name, class) keys.
     """
-    return {(c.tag, c.get("class") or c.get("name") or "") for c in section}
+    return {_child_key(c) for c in section}
 
 
 def _format_pos(position: tuple[float, float, float]) -> str:
