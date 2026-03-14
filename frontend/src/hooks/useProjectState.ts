@@ -2,7 +2,7 @@
  * Hook for loading project state from the backend.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { getProject } from "@/api/client";
 import type {
@@ -29,15 +29,18 @@ export interface ProjectState {
   loading: boolean;
   /** Error message if load failed. */
   error: string | null;
+  /** Trigger a re-fetch of project data. */
+  refresh: () => void;
 }
 
 /**
  * Load project data from the backend for state restoration.
  * @param projectId - Project identifier (null skips loading).
- * @returns Project state with loading/error indicators.
+ * @returns Project state with loading/error indicators and refresh function.
  */
 export function useProjectState(projectId: string | null): ProjectState {
-  const [state, setState] = useState<ProjectState>({
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [state, setState] = useState<Omit<ProjectState, "refresh">>({
     status: null,
     dimensions: null,
     recommendation: null,
@@ -46,6 +49,10 @@ export function useProjectState(projectId: string | null): ProjectState {
     loading: true,
     error: null,
   });
+
+  const refresh = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+  }, []);
 
   useEffect(() => {
     if (!projectId) {
@@ -81,7 +88,7 @@ export function useProjectState(projectId: string | null): ProjectState {
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, refreshKey]);
 
-  return state;
+  return { ...state, refresh };
 }

@@ -2,7 +2,7 @@
  * Project workflow page — renders the appropriate step based on URL.
  */
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { useProjectState } from "@/hooks/useProjectState";
@@ -81,6 +81,7 @@ export function ProjectWorkflow(): React.JSX.Element {
   }>();
   const navigate = useNavigate();
   const currentStep = (step ?? "upload") as Step;
+  const selfNavigating = useRef(false);
 
   const {
     status,
@@ -89,10 +90,15 @@ export function ProjectWorkflow(): React.JSX.Element {
     iterationHistory,
     loading,
     error,
+    refresh,
   } = useProjectState(projectId ?? null);
 
   useEffect(() => {
     if (!status || loading) return;
+    if (selfNavigating.current) {
+      selfNavigating.current = false;
+      return;
+    }
     const minPhase = STEP_MIN_PHASE[currentStep];
     if (!phaseReached(status.current_phase, minPhase)) {
       const allowed = PHASE_TO_STEP[status.current_phase];
@@ -102,32 +108,39 @@ export function ProjectWorkflow(): React.JSX.Element {
 
   const handleUploadComplete = useCallback(
     (id: string, _dims: Dimensions) => {
+      selfNavigating.current = true;
       navigate(`/projects/${id}/calibrate`);
     },
     [navigate],
   );
 
   const handleCalibrationComplete = useCallback(() => {
+    selfNavigating.current = true;
+    refresh();
     navigate(`/projects/${projectId}/recommend`);
-  }, [navigate, projectId]);
+  }, [navigate, projectId, refresh]);
 
   const handleRecommendationComplete = useCallback(
     (_rec: Recommendation) => {
+      selfNavigating.current = true;
+      refresh();
       navigate(`/projects/${projectId}/simulate`);
     },
-    [navigate, projectId],
+    [navigate, projectId, refresh],
   );
 
   const handleSimulationComplete = useCallback(
     (_result: SimResult) => {
+      selfNavigating.current = true;
+      refresh();
       navigate(`/projects/${projectId}/results`);
     },
-    [navigate, projectId],
+    [navigate, projectId, refresh],
   );
 
   const handleIterationComplete = useCallback(
     (_result: SimResult, _history: IterationLog[]) => {
-      // Stay on results page, state refreshes via props
+      refresh();
     },
     [],
   );
